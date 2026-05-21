@@ -6,6 +6,24 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-21
+
+### Fixed
+
+- **Empty bullet lines are dropped.** When a PDF had a stray bullet
+  glyph with no text after it (e.g. a banner-area decorative glyph
+  that the bullet regex caught), 0.5.0 emitted a `- ` line by itself.
+  `applyBulletReplacement` now returns `null` for empty-after-glyph
+  lines and `emitLines` skips them.
+- **Heading merge now spans multi-line blank gaps.** In single-content
+  mode, the inter-block joiner produced 3+ consecutive blank lines
+  before `collapseBlankLines` ran, and the merge function only
+  tolerated one blank between same-level headings — so duplicated
+  title-only / body slide pairs like Page 16 + Page 17
+  (`#### What kinds of tasks can an intelligent system perform?`)
+  stayed as two separate headings instead of one merged heading.
+  Merge now skips any number of consecutive blank lines.
+
 ## [0.5.0] - 2026-05-21
 
 ### Added

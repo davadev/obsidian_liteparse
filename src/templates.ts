@@ -219,19 +219,28 @@ function escapeMarkdown(line: string): string {
 const BULLET_REGEX =
 	/^[ \t]*([\u{E000}-\u{F8FF}\u{FFFD}•●◉▪▫◦‣⁃▶►◆◇∙■□❖❑❒♦♢★☆⚫⚪⬤◼◻▸▹·]|\*(?=\s))\s+/u;
 
-function applyBulletReplacement(text: string, replacement: string): string {
+/**
+ * Replace a leading bullet glyph with the configured replacement.
+ * Returns `null` if the bullet line is empty/whitespace-only after
+ * stripping the glyph (caller should drop the line entirely).
+ */
+function applyBulletReplacement(text: string, replacement: string): string | null {
 	if (!replacement) return text;
 	const m = text.match(BULLET_REGEX);
 	if (!m) return text;
-	return `${replacement} ${text.slice(m[0].length)}`;
+	const rest = text.slice(m[0].length).trim();
+	if (!rest) return null;
+	return `${replacement} ${rest}`;
 }
 
-function applyLineMarkup(line: ReflowLine, ctx: RenderContext): string {
+function applyLineMarkup(line: ReflowLine, ctx: RenderContext): string | null {
 	const settings = ctx.settings;
 	let text = line.text;
 
 	if (settings.bulletReplacement) {
-		text = applyBulletReplacement(text, settings.bulletReplacement);
+		const replaced = applyBulletReplacement(text, settings.bulletReplacement);
+		if (replaced === null) return null; // drop empty bullets
+		text = replaced;
 	}
 
 	// Heading detection — emit `## title` / `### title` for short, large lines.
@@ -265,6 +274,8 @@ function emitLines(lines: ReflowLine[], ctx: RenderContext): string {
 	const out: string[] = [];
 	let prevLine: ReflowLine | null = null;
 	for (const line of lines) {
+		const rendered = applyLineMarkup(line, ctx);
+		if (rendered === null) continue; // line dropped (empty bullet)
 		if (prevLine) {
 			const prevY = prevLine.items.reduce((s, it) => s + itemY(it), 0) / prevLine.items.length;
 			const curY = line.items.reduce((s, it) => s + itemY(it), 0) / line.items.length;
@@ -272,7 +283,7 @@ function emitLines(lines: ReflowLine[], ctx: RenderContext): string {
 			const prevH = prevLine.items.reduce((m, it) => Math.max(m, itemHeight(it)), 0) || 10;
 			if (gap > Math.max(prevH * 1.6, 14)) out.push("");
 		}
-		out.push(applyLineMarkup(line, ctx));
+		out.push(rendered);
 		prevLine = line;
 	}
 	return out.join("\n");

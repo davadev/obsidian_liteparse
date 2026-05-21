@@ -183,8 +183,9 @@ function mergeConsecutiveHeadingsInBody(text: string): string {
 		let j = i + 1;
 		while (j < lines.length) {
 			if (lines[j].trim() === "") {
-				// allow a blank line between same-level headings
+				// allow any number of blank lines between same-level headings
 				let k = j + 1;
+				while (k < lines.length && lines[k].trim() === "") k++;
 				if (k < lines.length) {
 					const mn = lines[k].match(/^(#{2,6})\s+(.*\S)\s*$/);
 					if (mn && mn[1] === level) {
