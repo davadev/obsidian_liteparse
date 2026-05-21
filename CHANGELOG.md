@@ -6,6 +6,32 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-21
+
+### Added
+
+- **Live regex feedback in probe editors.** Pattern inputs now validate
+  their regex on every keystroke. Invalid patterns (e.g. `*Viktoria*` —
+  bare `*` is not a regex quantifier you can put at the start) get a red
+  border and a hover tooltip with the underlying error. Previously such
+  patterns were silently skipped during parsing, leaving users to wonder
+  why their probe never fired.
+- **Live match indicator in the visual editor's probe preview.** Each
+  probe row now shows ✓ matches / ✗ no match / ✗ invalid regex / (no
+  pattern) next to its extracted-text line. Edit the regex or the
+  rectangle and the indicator updates immediately, so you can iterate
+  the pattern against the real PDF text without re-running a parse.
+- **Notice during parse when a probe has invalid regex.** Surfaces up to
+  three of the offending `template/probe` names so users notice the
+  silent skip and fix the pattern.
+
+### Fixed
+
+- **Visual editor probe table overflow.** The probes table wrapped in
+  its own `overflow-x: auto` scroller, matching the settings card fix
+  from 0.6.1. The visual editor modal no longer scrolls horizontally
+  when a long probe row pushes the table beyond the modal width.
+
 ## [0.6.1] - 2026-05-21
 
 ### Fixed

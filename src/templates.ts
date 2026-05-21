@@ -430,12 +430,11 @@ function evaluateProbes(
 	template: ParsingTemplate,
 	page: RawPage,
 	debug: boolean,
+	invalid?: Set<string>,
 ): ProbeAction | null {
 	const probes = template.probes;
 	if (!probes || probes.length === 0) return null;
 	const text = (() => {
-		// memoize the per-page extracted text per probe area (each probe has
-		// its own rect, so cache by probe ref)
 		const cache = new Map<TemplateProbe, string>();
 		return (probe: TemplateProbe) => {
 			const cached = cache.get(probe);
@@ -452,6 +451,8 @@ function evaluateProbes(
 			re = new RegExp(probe.pattern, probe.flags ?? "");
 		} catch (err) {
 			if (debug) console.debug("[liteparse-pdf-parser] probe regex invalid", probe.name, err);
+			if (invalid)
+				invalid.add(`${template.name}/${probe.name}: ${err instanceof Error ? err.message : String(err)}`);
 			continue;
 		}
 		const sample = text(probe);
@@ -488,6 +489,7 @@ export function resolveEffectiveTemplate(
 	page: RawPage,
 	allTemplates: ParsingTemplate[],
 	debug: boolean,
+	invalidProbes?: Set<string>,
 ): ResolvedTemplate {
 	if (!initial) return { template: null, skip: false };
 	const visited = new Set<string>();
@@ -499,7 +501,7 @@ export function resolveEffectiveTemplate(
 			return { template: current, skip: false };
 		}
 		visited.add(current.name);
-		const action = evaluateProbes(current, page, debug);
+		const action = evaluateProbes(current, page, debug, invalidProbes);
 		if (!action) return { template: current, skip: false };
 		if (action.kind === "use-current") return { template: current, skip: false };
 		if (action.kind === "skip") return { template: null, skip: true };

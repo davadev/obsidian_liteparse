@@ -619,9 +619,11 @@ export class VisualRegionEditorModal extends Modal {
 	private renderProbeList(): void {
 		if (!this.probeListEl) return;
 		this.probeListEl.empty();
-		const tbl = this.probeListEl.createEl("table");
-		tbl.style.width = "100%";
+		const scroller = this.probeListEl.createDiv();
+		scroller.style.overflowX = "auto";
+		const tbl = scroller.createEl("table");
 		tbl.style.fontSize = "0.85em";
+		tbl.style.whiteSpace = "nowrap";
 		const thead = tbl.createEl("thead").createEl("tr");
 		for (const h of ["", "Name", "x", "y", "w", "h", "Pattern", "Flags", "Action", "Target", ""]) {
 			const th = thead.createEl("th", { text: h });
@@ -638,22 +640,72 @@ export class VisualRegionEditorModal extends Modal {
 				"No probes. Switch Draw to Probes and drag a small area on the page to add one.",
 			);
 		}
-		const previewCells: Array<{ probeId: number; el: HTMLElement }> = [];
+		const previewCells: Array<{
+			probeId: number;
+			textEl: HTMLElement;
+			badgeEl: HTMLElement;
+		}> = [];
+		const patternInputs = new Map<number, HTMLInputElement>();
+		const validatePattern = (probe: DraftProbe): { ok: true; re: RegExp } | { ok: false; err: string } => {
+			if (!probe.pattern) return { ok: false, err: "empty" };
+			try {
+				return { ok: true, re: new RegExp(probe.pattern, probe.flags || "") };
+			} catch (err) {
+				return { ok: false, err: err instanceof Error ? err.message : String(err) };
+			}
+		};
+		const applyPatternValidity = (probe: DraftProbe) => {
+			const input = patternInputs.get(probe.id);
+			if (!input) return;
+			if (!probe.pattern) {
+				input.style.borderColor = "";
+				input.title = "";
+				return;
+			}
+			const v = validatePattern(probe);
+			if (v.ok) {
+				input.style.borderColor = "";
+				input.title = "";
+			} else {
+				input.style.borderColor = "var(--text-error)";
+				input.title = `Invalid regex: ${v.err}`;
+			}
+		};
 		const refreshPreview = (probeId: number) => {
 			const cell = previewCells.find((p) => p.probeId === probeId);
 			if (!cell) return;
 			const probe = this.probes.find((p) => p.id === probeId);
 			if (!probe) return;
 			const text = this.extractTextForRect(probe.xPct, probe.yPct, probe.wPct, probe.hPct);
+			applyPatternValidity(probe);
 			if (!this.currentPage) {
-				cell.el.setText("(load a page to preview probe text)");
-				cell.el.style.color = "var(--text-muted)";
-			} else if (!text) {
-				cell.el.setText("(no text in this area on this page)");
-				cell.el.style.color = "var(--text-muted)";
+				cell.textEl.setText("(load a page to preview probe text)");
+				cell.textEl.style.color = "var(--text-muted)";
+				cell.badgeEl.setText("");
+				return;
+			}
+			if (!text) {
+				cell.textEl.setText("(no text in this area on this page)");
+				cell.textEl.style.color = "var(--text-muted)";
+				cell.badgeEl.setText("");
+				return;
+			}
+			cell.textEl.setText(text);
+			cell.textEl.style.color = "var(--text-normal)";
+			const v = validatePattern(probe);
+			cell.badgeEl.empty();
+			if (!probe.pattern) {
+				cell.badgeEl.setText("(no pattern)");
+				cell.badgeEl.style.color = "var(--text-muted)";
+			} else if (!v.ok) {
+				cell.badgeEl.setText("✗ invalid regex");
+				cell.badgeEl.style.color = "var(--text-error)";
+			} else if (v.re.test(text)) {
+				cell.badgeEl.setText("✓ matches");
+				cell.badgeEl.style.color = "var(--text-success, #58a14e)";
 			} else {
-				cell.el.setText(text);
-				cell.el.style.color = "var(--text-normal)";
+				cell.badgeEl.setText("✗ no match");
+				cell.badgeEl.style.color = "var(--text-muted)";
 			}
 		};
 
@@ -717,9 +769,13 @@ export class VisualRegionEditorModal extends Modal {
 			patternInput.placeholder = "^Exercise\\b";
 			patternInput.style.width = "10rem";
 			patternInput.style.fontFamily = "var(--font-monospace)";
-			patternInput.onchange = () => {
+			patternInputs.set(probe.id, patternInput);
+			const onPatternInput = () => {
 				probe.pattern = patternInput.value;
+				refreshPreview(probe.id);
 			};
+			patternInput.oninput = onPatternInput;
+			patternInput.onchange = onPatternInput;
 
 			const flagsTd = tr.createEl("td");
 			const flagsInput = flagsTd.createEl("input", { type: "text" });
@@ -727,9 +783,12 @@ export class VisualRegionEditorModal extends Modal {
 			flagsInput.placeholder = "i";
 			flagsInput.style.width = "3rem";
 			flagsInput.style.fontFamily = "var(--font-monospace)";
-			flagsInput.onchange = () => {
+			const onFlagsInput = () => {
 				probe.flags = flagsInput.value;
+				refreshPreview(probe.id);
 			};
+			flagsInput.oninput = onFlagsInput;
+			flagsInput.onchange = onFlagsInput;
 
 			const actionTd = tr.createEl("td");
 			const actionSel = actionTd.createEl("select");
@@ -784,13 +843,18 @@ export class VisualRegionEditorModal extends Modal {
 			labelTd.style.textAlign = "right";
 			labelTd.style.paddingRight = "0.4rem";
 			const previewTd = previewTr.createEl("td");
-			previewTd.colSpan = 10;
+			previewTd.colSpan = 9;
 			previewTd.style.fontFamily = "var(--font-monospace)";
 			previewTd.style.fontSize = "0.8em";
 			previewTd.style.whiteSpace = "normal";
 			previewTd.style.wordBreak = "break-word";
 			previewTd.style.padding = "0.1rem 0 0.4rem 0";
-			previewCells.push({ probeId: probe.id, el: previewTd });
+			const badgeTd = previewTr.createEl("td");
+			badgeTd.style.fontSize = "0.8em";
+			badgeTd.style.fontWeight = "600";
+			badgeTd.style.whiteSpace = "nowrap";
+			badgeTd.style.padding = "0.1rem 0.4rem";
+			previewCells.push({ probeId: probe.id, textEl: previewTd, badgeEl: badgeTd });
 			refreshPreview(probe.id);
 			void idx;
 		});

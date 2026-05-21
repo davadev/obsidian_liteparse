@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, TFile, Vault } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, TFile, Vault } from "obsidian";
 import { spawn } from "child_process";
 import { LiteParsePluginSettings, ParsingTemplate } from "./types";
 import {
@@ -231,6 +231,7 @@ function renderMarkdownFromPages(
 	settings: LiteParsePluginSettings,
 	pdfVaultPath: string,
 	templateOverride: ParsingTemplate | null | undefined,
+	invalidProbes?: Set<string>,
 ): string {
 	const autoMatched =
 		templateOverride === undefined
@@ -247,8 +248,6 @@ function renderMarkdownFromPages(
 	for (const page of pages) {
 		idx++;
 		const num = pageNumberOf(page, idx);
-		// Probes only run when no explicit template override was provided —
-		// the "choose template…" command must dispatch deterministically.
 		let pageTemplate: ParsingTemplate | null = autoMatched;
 		if (templateOverride === undefined && autoMatched) {
 			const resolved = resolveEffectiveTemplate(
@@ -256,6 +255,7 @@ function renderMarkdownFromPages(
 				page,
 				settings.templates,
 				settings.debugLogging,
+				invalidProbes,
 			);
 			if (resolved.skip) continue;
 			pageTemplate = resolved.template;
@@ -361,7 +361,21 @@ export async function parsePdf(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const r: any = parsed;
 	const pages: RawPage[] = Array.isArray(r.pages) ? r.pages : [];
-	const markdown = renderMarkdownFromPages(pages, settings, pdfVaultPath, templateOverride);
+	const invalidProbes = new Set<string>();
+	const markdown = renderMarkdownFromPages(
+		pages,
+		settings,
+		pdfVaultPath,
+		templateOverride,
+		invalidProbes,
+	);
+	if (invalidProbes.size > 0) {
+		const list = Array.from(invalidProbes).slice(0, 3).join("; ");
+		new Notice(
+			`LiteParse: ${invalidProbes.size} probe(s) had invalid regex and were skipped: ${list}`,
+			10000,
+		);
+	}
 	const text: string =
 		typeof r.text === "string"
 			? r.text

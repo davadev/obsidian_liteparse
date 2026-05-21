@@ -639,15 +639,42 @@ export class LiteParseSettingTab extends PluginSettingTab {
 				async (v) => {
 					probe.pattern = v;
 					await this.plugin.saveSettings();
+					applyValidity();
 				},
 			);
 			patternInput.style.fontFamily = "var(--font-monospace)";
+			const applyValidity = () => {
+				if (!probe.pattern) {
+					patternInput.style.borderColor = "";
+					patternInput.title = "";
+					return;
+				}
+				try {
+					new RegExp(probe.pattern, probe.flags || "");
+					patternInput.style.borderColor = "";
+					patternInput.title = "";
+				} catch (err) {
+					patternInput.style.borderColor = "var(--text-error)";
+					patternInput.title = `Invalid regex: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			};
+			patternInput.addEventListener("input", () => {
+				probe.pattern = patternInput.value;
+				applyValidity();
+			});
+			applyValidity();
 			const flagsInput = mkInput("text", probe.flags ?? "", "2.5rem", "i", async (v) => {
 				if (v) probe.flags = v;
 				else delete probe.flags;
 				await this.plugin.saveSettings();
+				applyValidity();
 			});
 			flagsInput.style.fontFamily = "var(--font-monospace)";
+			flagsInput.addEventListener("input", () => {
+				if (flagsInput.value) probe.flags = flagsInput.value;
+				else delete probe.flags;
+				applyValidity();
+			});
 
 			const actionTd = tr.createEl("td");
 			const actionSel = actionTd.createEl("select");
