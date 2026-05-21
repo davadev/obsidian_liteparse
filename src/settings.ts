@@ -129,6 +129,65 @@ export class LiteParseSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		containerEl.createEl("h3", { text: "Markup detection" });
+
+		new Setting(containerEl)
+			.setName("Bullet replacement")
+			.setDesc(
+				"When a line starts with an unparseable bullet glyph (e.g. �, •, ●, ▪), " +
+				"replace it with this string + space. Leave empty to keep the original glyph.",
+			)
+			.addText((t) =>
+				t
+					.setPlaceholder("-")
+					.setValue(this.plugin.settings.bulletReplacement)
+					.onChange(async (v) => {
+						this.plugin.settings.bulletReplacement = v;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Detect bold / italic")
+			.setDesc(
+				"Wrap whole lines in **bold** or *italic* when LiteParse reports a " +
+				"bold/italic font name for every text item on the line.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.detectBoldItalic).onChange(async (v) => {
+					this.plugin.settings.detectBoldItalic = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Detect headings")
+			.setDesc(
+				"Emit short lines as `## title` or `### title` when their font size " +
+				"is significantly larger than the document's median font size.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.detectHeadings).onChange(async (v) => {
+					this.plugin.settings.detectHeadings = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Heading size multiplier")
+			.setDesc("A line whose font size is at least (median × this) is a heading candidate. Default 1.3.")
+			.addText((t) =>
+				t
+					.setPlaceholder("1.3")
+					.setValue(String(this.plugin.settings.headingFontMultiplier))
+					.onChange(async (v) => {
+						const n = Number(v);
+						this.plugin.settings.headingFontMultiplier =
+							Number.isFinite(n) && n > 1 ? n : 1.3;
+						await this.plugin.saveSettings();
+					}),
+			);
+
 		new Setting(containerEl)
 			.setName("Output format")
 			.setDesc(

@@ -1,4 +1,4 @@
-import { ParsingTemplate, TemplateRegion } from "./types";
+import { LiteParsePluginSettings, ParsingTemplate, TemplateRegion } from "./types";
 
 export interface RawTextItem {
 	text?: string;
@@ -10,6 +10,7 @@ export interface RawTextItem {
 	w?: number;
 	h?: number;
 	fontSize?: number;
+	fontName?: string;
 }
 
 export interface RawPage {
@@ -26,29 +27,49 @@ export interface PageSection {
 	body: string;
 }
 
-export interface RenderedPage {
-	pageNumber: number;
-	sections: PageSection[];
+interface ReflowLine {
+	items: RawTextItem[];
+	text: string;
+	maxFontSize: number;
+	allBold: boolean;
+	allItalic: boolean;
+}
+
+interface RenderContext {
+	mode: "reflow" | "raw";
+	templatePages: Set<number> | null;
+	baseFontSize: number;
+	settings: LiteParsePluginSettings;
 }
 
 function itemX(item: RawTextItem): number {
 	return Number(item.x ?? 0);
 }
-
 function itemY(item: RawTextItem): number {
 	return Number(item.y ?? 0);
 }
-
 function itemWidth(item: RawTextItem): number {
 	return Number(item.width ?? item.w ?? 0);
 }
-
 function itemHeight(item: RawTextItem): number {
 	return Number(item.height ?? item.h ?? item.fontSize ?? 0);
 }
-
 function itemText(item: RawTextItem): string {
 	return String(item.text ?? item.str ?? "");
+}
+function itemFontSize(item: RawTextItem): number {
+	const n = Number(item.fontSize ?? itemHeight(item));
+	return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function itemFontName(item: RawTextItem): string {
+	return String(item.fontName ?? "");
+}
+
+function isBoldFont(name: string): boolean {
+	return /bold|black|heavy|semibold/i.test(name);
+}
+function isItalicFont(name: string): boolean {
+	return /italic|oblique/i.test(name);
 }
 
 function parsePageRangeSpec(spec: string | undefined): Set<number> | null {
@@ -71,10 +92,6 @@ function parsePageRangeSpec(spec: string | undefined): Set<number> | null {
 	return out.size ? out : null;
 }
 
-/**
- * Find a template whose `match` regex matches the PDF's vault-relative
- * path. Returns null if none match.
- */
 export function selectTemplate(
 	templates: ParsingTemplate[],
 	pdfPath: string,
@@ -91,10 +108,6 @@ export function selectTemplate(
 	return null;
 }
 
-/**
- * Convert a percent-based region (top-left origin, 0..100) into PDF-point
- * bounds (bottom-left origin) for a page with the given dimensions.
- */
 interface PdfRect {
 	xMin: number;
 	xMax: number;
@@ -105,21 +118,21 @@ interface PdfRect {
 	headingLevel?: number;
 }
 
+/**
+ * Convert a percent-based region (top-left origin, 0..100) into PDF-point
+ * bounds. LiteParse uses TOP-LEFT origin in its textItems (y grows
+ * downward), so no axis flip is required.
+ */
 function regionToPdfRect(region: TemplateRegion, pageW: number, pageH: number): PdfRect {
 	const x = Math.max(0, Math.min(100, region.x));
 	const y = Math.max(0, Math.min(100, region.y));
 	const w = Math.max(0, Math.min(100 - x, region.w));
 	const h = Math.max(0, Math.min(100 - y, region.h));
-	const xMin = (x / 100) * pageW;
-	const xMax = ((x + w) / 100) * pageW;
-	// flip y: top-left input → bottom-left PDF
-	const yMax = pageH - (y / 100) * pageH;
-	const yMin = pageH - ((y + h) / 100) * pageH;
 	return {
-		xMin,
-		xMax,
-		yMin,
-		yMax,
+		xMin: (x / 100) * pageW,
+		xMax: ((x + w) / 100) * pageW,
+		yMin: (y / 100) * pageH,
+		yMax: ((y + h) / 100) * pageH,
 		role: region.role,
 		name: region.name,
 		headingLevel: region.headingLevel,
@@ -139,13 +152,13 @@ function inRect(item: RawTextItem, rect: PdfRect): boolean {
 }
 
 /**
- * Reconstruct flowing text from a set of textItems by grouping items into
- * visual lines (by y proximity) and joining them with single spaces.
+ * Group items into visual lines (top-to-bottom, then left-to-right) and
+ * compute per-line markup hints.
  */
-function reflowItems(items: RawTextItem[]): string {
-	if (items.length === 0) return "";
+function buildLines(items: RawTextItem[]): ReflowLine[] {
+	if (items.length === 0) return [];
 	const sorted = [...items].sort((a, b) => {
-		const yDiff = itemY(b) - itemY(a); // top first (higher y first in PDF coords)
+		const yDiff = itemY(a) - itemY(b); // ascending y = top first (top-left origin)
 		if (Math.abs(yDiff) > 0.5) return yDiff;
 		return itemX(a) - itemX(b);
 	});
@@ -158,7 +171,7 @@ function reflowItems(items: RawTextItem[]): string {
 	for (const item of sorted) {
 		const y = itemY(item);
 		const h = itemHeight(item) || 10;
-		if (currentY === null || Math.abs(currentY - y) <= Math.max(h * 0.6, 3)) {
+		if (currentY === null || Math.abs(currentY - y) <= Math.max(h * 0.5, 2.5)) {
 			currentLine.push(item);
 			currentY = currentY === null ? y : (currentY + y) / 2;
 			lineHeight = Math.max(lineHeight, h);
@@ -171,35 +184,94 @@ function reflowItems(items: RawTextItem[]): string {
 	}
 	if (currentLine.length) lines.push(currentLine);
 
-	const out: string[] = [];
-	let prevY: number | null = null;
-	let prevH = 0;
+	const reflowLines: ReflowLine[] = [];
 	for (const line of lines) {
 		line.sort((a, b) => itemX(a) - itemX(b));
 		const text = line.map(itemText).join(" ").replace(/\s+/g, " ").trim();
 		if (!text) continue;
-		const y = line.reduce((s, it) => s + itemY(it), 0) / line.length;
-		const h = Math.max(...line.map(itemHeight), 10);
-		if (prevY !== null) {
-			const gap = prevY - y;
-			if (gap > Math.max(prevH * 1.5, 12)) {
-				out.push("");
-			}
+		const meaningful = line.filter((i) => itemText(i).trim());
+		const allBold =
+			meaningful.length > 0 && meaningful.every((i) => isBoldFont(itemFontName(i)));
+		const allItalic =
+			meaningful.length > 0 && meaningful.every((i) => isItalicFont(itemFontName(i)));
+		const maxFontSize = line.reduce((m, i) => Math.max(m, itemFontSize(i)), 0);
+		reflowLines.push({ items: line, text, maxFontSize, allBold, allItalic });
+	}
+	return reflowLines;
+}
+
+function escapeMarkdown(line: string): string {
+	// Avoid accidentally enabling Markdown emphasis/headings from raw PDF
+	// text. Only escape leading `#` so paragraphs don't become headings.
+	return line.replace(/^#+\s/, (m) => `\\${m}`);
+}
+
+const BULLET_REGEX =
+	/^([\u{FFFD}•●◉▪▫◦‣⁃▶►◆◇∙■□❖❑❒♦♢★☆⚫⚪⬤◼◻]|\*)\s+/u;
+
+function applyBulletReplacement(text: string, replacement: string): string {
+	if (!replacement) return text;
+	const m = text.match(BULLET_REGEX);
+	if (!m) return text;
+	return `${replacement} ${text.slice(m[0].length)}`;
+}
+
+function applyLineMarkup(line: ReflowLine, ctx: RenderContext): string {
+	const settings = ctx.settings;
+	let text = line.text;
+
+	if (settings.bulletReplacement) {
+		text = applyBulletReplacement(text, settings.bulletReplacement);
+	}
+
+	// Heading detection — emit `## title` / `### title` for short, large lines.
+	if (
+		settings.detectHeadings &&
+		ctx.baseFontSize > 0 &&
+		line.maxFontSize >= ctx.baseFontSize * settings.headingFontMultiplier
+	) {
+		const ratio = line.maxFontSize / ctx.baseFontSize;
+		const words = text.split(/\s+/).length;
+		// only treat as heading if the line is short — avoids "headlining"
+		// every large body line
+		if (words <= 14) {
+			const level = ratio >= settings.headingFontMultiplier * 1.25 ? 2 : 3;
+			return `${"#".repeat(level + 1)} ${text}`;
 		}
-		out.push(text);
-		prevY = y;
-		prevH = h;
+	}
+
+	text = escapeMarkdown(text);
+
+	if (settings.detectBoldItalic) {
+		if (line.allBold && line.allItalic) text = `***${text}***`;
+		else if (line.allBold) text = `**${text}**`;
+		else if (line.allItalic) text = `*${text}*`;
+	}
+
+	return text;
+}
+
+function emitLines(lines: ReflowLine[], ctx: RenderContext): string {
+	const out: string[] = [];
+	let prevLine: ReflowLine | null = null;
+	for (const line of lines) {
+		if (prevLine) {
+			const prevY = prevLine.items.reduce((s, it) => s + itemY(it), 0) / prevLine.items.length;
+			const curY = line.items.reduce((s, it) => s + itemY(it), 0) / line.items.length;
+			const gap = curY - prevY;
+			const prevH = prevLine.items.reduce((m, it) => Math.max(m, itemHeight(it)), 0) || 10;
+			if (gap > Math.max(prevH * 1.6, 14)) out.push("");
+		}
+		out.push(applyLineMarkup(line, ctx));
+		prevLine = line;
 	}
 	return out.join("\n");
 }
 
-/**
- * Apply a template's regions to a single page's textItems, returning the
- * ordered sections of text per include region.
- */
 function applyTemplateToPage(
 	template: ParsingTemplate,
 	page: RawPage,
+	ctx: RenderContext,
 ): PageSection[] {
 	const items = page.textItems ?? [];
 	const pageW = Number(page.width ?? 612);
@@ -214,14 +286,16 @@ function applyTemplateToPage(
 	const survivors = items.filter((it) => !excludeRects.some((r) => inRect(it, r)));
 
 	if (includeRects.length === 0) {
-		const body = reflowItems(survivors);
+		const lines = buildLines(survivors);
+		const body = emitLines(lines, ctx);
 		return body ? [{ heading: null, body }] : [];
 	}
 
 	const sections: PageSection[] = [];
 	for (const rect of includeRects) {
 		const inside = survivors.filter((it) => inRect(it, rect));
-		const body = reflowItems(inside);
+		const lines = buildLines(inside);
+		const body = emitLines(lines, ctx);
 		if (!body) continue;
 		const heading =
 			rect.headingLevel && rect.headingLevel >= 1 && rect.headingLevel <= 6
@@ -232,25 +306,29 @@ function applyTemplateToPage(
 	return sections;
 }
 
-/**
- * Build the rendered sections for a page using either a matched template
- * or the default reflow (no regions, all items).
- */
 export function renderPage(
 	page: RawPage,
 	template: ParsingTemplate | null,
-	mode: "reflow" | "raw",
+	settings: LiteParsePluginSettings,
+	baseFontSize: number,
 	templatePages: Set<number> | null,
 ): PageSection[] {
+	const ctx: RenderContext = {
+		mode: settings.extractionMode,
+		templatePages,
+		baseFontSize,
+		settings,
+	};
 	const num = Number(page.page ?? page.pageNum ?? 0);
 	if (template && (!templatePages || templatePages.has(num))) {
-		return applyTemplateToPage(template, page);
+		return applyTemplateToPage(template, page, ctx);
 	}
-	if (mode === "raw") {
+	if (settings.extractionMode === "raw") {
 		const body = String(page.text ?? "").replace(/\s+$/g, "");
 		return body ? [{ heading: null, body }] : [];
 	}
-	const body = reflowItems(page.textItems ?? []);
+	const lines = buildLines(page.textItems ?? []);
+	const body = emitLines(lines, ctx);
 	return body ? [{ heading: null, body }] : [];
 }
 
@@ -262,4 +340,22 @@ export function pageNumberOf(page: RawPage, fallback: number): number {
 export function templatePageFilter(template: ParsingTemplate | null): Set<number> | null {
 	if (!template) return null;
 	return parsePageRangeSpec(template.pages);
+}
+
+/**
+ * Compute a robust base font size for the document — the median of all
+ * textItem font sizes. Used as the threshold reference for heading
+ * detection.
+ */
+export function computeBaseFontSize(pages: RawPage[]): number {
+	const sizes: number[] = [];
+	for (const p of pages) {
+		for (const it of p.textItems ?? []) {
+			const s = itemFontSize(it);
+			if (s > 0) sizes.push(s);
+		}
+	}
+	if (sizes.length === 0) return 12;
+	sizes.sort((a, b) => a - b);
+	return sizes[Math.floor(sizes.length / 2)];
 }

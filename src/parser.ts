@@ -8,6 +8,7 @@ import {
 	PluginPaths,
 } from "./installer";
 import {
+	computeBaseFontSize,
 	pageNumberOf,
 	RawPage,
 	renderPage,
@@ -171,13 +172,14 @@ function renderMarkdownFromPages(
 			? selectTemplate(settings.templates, pdfVaultPath)
 			: templateOverride;
 	const templatePages = templatePageFilter(template);
+	const baseFontSize = computeBaseFontSize(pages);
 	const divider = (settings.pageDivider ?? "").trim();
 	const blocks: string[] = [];
 	let idx = 0;
 	for (const page of pages) {
 		idx++;
 		const num = pageNumberOf(page, idx);
-		const sections = renderPage(page, template, settings.extractionMode, templatePages);
+		const sections = renderPage(page, template, settings, baseFontSize, templatePages);
 		if (sections.length === 0) continue;
 		const parts: string[] = [];
 		if (settings.includePageHeadings) {

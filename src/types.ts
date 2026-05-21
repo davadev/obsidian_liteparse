@@ -56,6 +56,12 @@ export interface LiteParsePluginSettings {
 	pageDivider: string;
 	collapseBlankLines: boolean;
 
+	// markup detection (from LiteParse textItem fontName/fontSize)
+	bulletReplacement: string;
+	detectBoldItalic: boolean;
+	detectHeadings: boolean;
+	headingFontMultiplier: number;
+
 	// templates
 	templates: ParsingTemplate[];
 }
@@ -83,6 +89,11 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	includePageHeadings: true,
 	pageDivider: "---",
 	collapseBlankLines: true,
+
+	bulletReplacement: "-",
+	detectBoldItalic: true,
+	detectHeadings: true,
+	headingFontMultiplier: 1.3,
 
 	templates: [],
 };

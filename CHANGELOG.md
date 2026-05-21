@@ -6,6 +6,38 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-21
+
+### Fixed
+
+- **Reading order was reversed.** LiteParse's textItems use the
+  **top-left** coordinate origin (y grows downward), not the PDF
+  bottom-left convention. The reflow algorithm sorted descending y
+  ("higher y first") and template regions flipped y to "convert" to
+  PDF coords — both wrong. Lines were emitted bottom-to-top and
+  template excludes hit the wrong band, so the AI-1 slides parse
+  came out reversed with banner text at the end of each page. Reflow
+  now sorts ascending y and regions use textItem coordinates
+  directly. Existing templates do **not** need to be rewritten.
+
+### Added
+
+- **Bullet replacement.** Lines starting with an unparseable bullet
+  glyph (`�`, `•`, `●`, `▪`, `▫`, `◦`, `‣`, `⁃`, `▶`, `►`, `◆`, etc.)
+  are rewritten with a user-configurable prefix (default `-`) so they
+  render as proper Markdown lists. Set empty to disable.
+- **Bold / italic detection.** When every textItem on a line uses a
+  font name containing "Bold"/"Black"/"Heavy"/"Semibold" or "Italic"/
+  "Oblique", the line is wrapped in `**…**`, `*…*`, or `***…***`.
+  Mid-line markup is intentionally out of scope. Toggleable
+  (default on).
+- **Heading detection.** Short lines whose max font size is at least
+  `median × multiplier` (default 1.3, configurable) are emitted as
+  `## title` or `### title` instead of paragraph text. Toggleable
+  (default on).
+- Auto-escape leading `#` in paragraph text to avoid accidental
+  headings.
+
 ## [0.2.1] - 2026-05-21
 
 ### Added
