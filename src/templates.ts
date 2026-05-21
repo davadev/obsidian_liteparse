@@ -564,9 +564,8 @@ function splitIntoColumns(
 	scopeXMin: number,
 	scopeXMax: number,
 	settings: LiteParsePluginSettings,
-	_baseFontSize: number,
+	baseFontSize: number,
 ): ReflowLine[] | null {
-	void _baseFontSize;
 	if (items.length < 6) return null;
 	const scopeWidth = Math.max(1, scopeXMax - scopeXMin);
 
@@ -651,10 +650,22 @@ function splitIntoColumns(
 	const gutterLo = scopeXMin + bestStart * xBucketW;
 	const gutterHi = scopeXMin + (bestStart + bestLen) * xBucketW;
 
+	const headingMult = Math.max(1, settings.headingFontMultiplier);
+	const headingThreshold = baseFontSize > 0 ? baseFontSize * headingMult : Infinity;
+
 	const leftItems: RawTextItem[] = [];
 	const rightItems: RawTextItem[] = [];
 	const fullItems: RawTextItem[] = [];
 	for (const it of items) {
+		// Heading-sized items (slide titles, full-width subheadings) always
+		// emit above the columns regardless of x-position. Otherwise a
+		// narrow title sitting in the left column would emit somewhere in
+		// the middle of the left column flow.
+		const itemSize = itemFontSize(it) || itemHeight(it);
+		if (itemSize >= headingThreshold) {
+			fullItems.push(it);
+			continue;
+		}
 		const ix1 = itemX(it);
 		const ix2 = ix1 + itemWidth(it);
 		if (ix2 <= gutterLo + 0.5) leftItems.push(it);

@@ -6,6 +6,28 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-05-21
+
+### Fixed
+
+- **Slide titles now always emit above the columns.** Previously, a
+  narrow title sitting in the left column (e.g. "Grading" on a TUGraz
+  AI-1 slide, x=10–30%, not crossing the gutter at ~38%) was classified
+  as a left-column item. It got y-sorted with body items and ended up
+  emitting somewhere in the middle of the left-column flow instead of
+  at the top.
+- New rule in `splitIntoColumns`: any item whose font size is
+  heading-sized (`≥ baseFontSize × headingFontMultiplier`) is added to
+  the full-width bucket regardless of its x-position. Full-width items
+  emit first, so titles always land at the top of the page output,
+  whether or not they horizontally straddle the gutter.
+- Tradeoff: a heading-sized subheading that lives strictly inside one
+  column (uncommon) will now emit above the column rather than at its
+  in-column y-position. Trying to handle that perfectly requires
+  interleaving emission by y, which loses the "left column in full,
+  then right column in full" reading order the user explicitly asked
+  for.
+
 ## [0.7.1] - 2026-05-21
 
 ### Fixed
