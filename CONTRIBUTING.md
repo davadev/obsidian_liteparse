@@ -24,7 +24,7 @@ Symlink `main.js`, `manifest.json`, and `styles.css` into a real vault's
 
 ## Project layout
 
-See `README.md → Development → Source layout`.
+See `docs/development.md`.
 
 ## Coding style
 
@@ -50,4 +50,4 @@ Please include:
 
 - Open against `main`.
 - CI must pass.
-- If you modify behavior visible to end users, update `README.md`.
+- If you modify behavior visible to end users, update `README.md` and relevant files in `docs/`.

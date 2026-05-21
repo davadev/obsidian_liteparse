@@ -22,12 +22,49 @@ export interface TemplateRegion {
 	headingLevel?: number;
 }
 
+/**
+ * What to do when a probe's regex matches the text extracted from its area.
+ * - `skip`        : drop the entire page from output (no heading, no body, no divider).
+ * - `use-current` : keep parsing with the current template (default, same as no probe match).
+ * - `switch`      : dispatch the page to a different template referenced by name.
+ */
+export type ProbeAction =
+	| { kind: "skip" }
+	| { kind: "use-current" }
+	| { kind: "switch"; templateName: string };
+
+/**
+ * Pre-classification step run before include/exclude regions.
+ * Defines a rectangle on the page, a regex to test against the text inside
+ * that rectangle, and an action to take when the regex matches. Probes are
+ * evaluated in order; the first match wins.
+ */
+export interface TemplateProbe {
+	name: string;
+	/** Percent of page, top-left origin — same convention as TemplateRegion. */
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	/** Regex tested against the text inside the probe area. Empty pattern never matches. */
+	pattern: string;
+	/** Optional regex flags (e.g. "i", "m"). */
+	flags?: string;
+	onMatch: ProbeAction;
+}
+
 export interface ParsingTemplate {
 	name: string;
 	/** Regex matched against the PDF's vault-relative path. Use ".*" for default. */
 	match: string;
 	/** Optional page range (e.g. "1-5,10"). Empty means all pages. */
 	pages?: string;
+	/**
+	 * Optional pre-classification probes evaluated before include/exclude
+	 * regions. First matching probe wins; non-matching templates fall through
+	 * to their regions unchanged.
+	 */
+	probes?: TemplateProbe[];
 	regions: TemplateRegion[];
 }
 
@@ -65,6 +102,11 @@ export interface LiteParsePluginSettings {
 	mergeConsecutiveHeadings: boolean;
 	singleContentMode: boolean;
 
+	// columns
+	autoDetectColumns: boolean;
+	columnGutterMinPct: number;
+	columnFullWidthThresholdPct: number;
+
 	// templates
 	templates: ParsingTemplate[];
 }
@@ -100,6 +142,10 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	promoteTitleSlides: true,
 	mergeConsecutiveHeadings: true,
 	singleContentMode: false,
+
+	autoDetectColumns: true,
+	columnGutterMinPct: 5,
+	columnFullWidthThresholdPct: 60,
 
 	templates: [],
 };

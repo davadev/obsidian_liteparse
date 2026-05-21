@@ -6,6 +6,42 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-21
+
+### Added
+
+- **Probes — pre-classification layer for templates.** A template can now
+  define probes that run before include/exclude regions. Each probe is a
+  small rectangle on the page plus a regex tested against the text inside
+  it. When the regex matches, the probe's action fires: `skip` (drop the
+  page from output entirely), `use-current` (keep parsing with the current
+  template — same as no match), or `switch` to a named sibling template
+  (cycle-guarded chain). Probes are evaluated in order; first match wins.
+  Editable in each template card's "Probes (optional pre-classification)"
+  subsection, and in the visual editor via the new **Draw: Regions / Probes**
+  mode toggle. Probes render with a dotted magenta outline so they don't
+  visually conflict with regions. Existing templates without `probes` work
+  unchanged — the field is optional.
+- **Auto-detect two-column layouts.** When a page (or single body include
+  region wider than 60% of the page) clearly contains two text columns
+  separated by a vertical gutter, the parser now emits them in reading
+  order: full-width lines (titles) first, then the left column in full,
+  then the right column in full. Conservative gates (≥6 items, ≥4 distinct
+  y-bands, a ≥5%-wide gutter no item crosses, ≥50% vertical overlap on
+  both sides) make the detector silently bow out on single-column pages.
+  New toggle in Readability: **Auto-detect two-column layouts** (default
+  on). Manual two-include-region templates always override.
+- **Release workflow documentation.** New `docs/release.md` covering the
+  end-to-end release process: versioning rules, file roles
+  (`package.json` / `manifest.json` / `versions.json` / `version-bump.mjs`),
+  the tag-triggered idempotent Release workflow, BRAT integration, recovery
+  / yank guidance, manual `gh release create` fallback, and a pre-release
+  checklist. Linked from `README.md` and `docs/development.md`.
+- **CLAUDE.md** for AI assistants working in this repo — commands, the
+  esbuild + LiteParse-must-stay-external bundle invariant, the
+  Electron-renderer subprocess trap, template coordinate system pitfall,
+  and the readability shaping pipeline order.
+
 ## [0.5.1] - 2026-05-21
 
 ### Fixed

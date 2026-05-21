@@ -1,4 +1,10 @@
-import { LiteParsePluginSettings, ParsingTemplate, TemplateRegion } from "./types";
+import {
+	LiteParsePluginSettings,
+	ParsingTemplate,
+	ProbeAction,
+	TemplateProbe,
+	TemplateRegion,
+} from "./types";
 
 export interface RawTextItem {
 	text?: string;
@@ -123,7 +129,11 @@ interface PdfRect {
  * bounds. LiteParse uses TOP-LEFT origin in its textItems (y grows
  * downward), so no axis flip is required.
  */
-function regionToPdfRect(region: TemplateRegion, pageW: number, pageH: number): PdfRect {
+function percentRectToPdfBounds(
+	region: { x: number; y: number; w: number; h: number },
+	pageW: number,
+	pageH: number,
+): { xMin: number; xMax: number; yMin: number; yMax: number } {
 	const x = Math.max(0, Math.min(100, region.x));
 	const y = Math.max(0, Math.min(100, region.y));
 	const w = Math.max(0, Math.min(100 - x, region.w));
@@ -133,6 +143,13 @@ function regionToPdfRect(region: TemplateRegion, pageW: number, pageH: number): 
 		xMax: ((x + w) / 100) * pageW,
 		yMin: (y / 100) * pageH,
 		yMax: ((y + h) / 100) * pageH,
+	};
+}
+
+function regionToPdfRect(region: TemplateRegion, pageW: number, pageH: number): PdfRect {
+	const b = percentRectToPdfBounds(region, pageW, pageH);
+	return {
+		...b,
 		role: region.role,
 		name: region.name,
 		headingLevel: region.headingLevel,
@@ -306,8 +323,15 @@ function applyTemplateToPage(
 
 	const survivors = items.filter((it) => !excludeRects.some((r) => inRect(it, r)));
 
+	// Column auto-detect runs only when the user hasn't already split the
+	// page into multiple include regions — multiple includes are taken as
+	// a manual override that should win.
+	const tryColumns = ctx.settings.autoDetectColumns && includeRects.length <= 1;
+
 	if (includeRects.length === 0) {
-		const lines = buildLines(survivors);
+		const lines =
+			(tryColumns && splitIntoColumns(survivors, 0, pageW, ctx.settings)) ||
+			buildLines(survivors);
 		const body = emitLines(lines, ctx);
 		return body ? [{ heading: null, body }] : [];
 	}
@@ -315,7 +339,12 @@ function applyTemplateToPage(
 	const sections: PageSection[] = [];
 	for (const rect of includeRects) {
 		const inside = survivors.filter((it) => inRect(it, rect));
-		const lines = buildLines(inside);
+		const rectWidthFrac = (rect.xMax - rect.xMin) / Math.max(1, pageW);
+		const eligibleForColumns = tryColumns && rectWidthFrac >= 0.6;
+		const lines =
+			(eligibleForColumns &&
+				splitIntoColumns(inside, rect.xMin, rect.xMax, ctx.settings)) ||
+			buildLines(inside);
 		const body = emitLines(lines, ctx);
 		if (!body) continue;
 		const heading =
@@ -348,7 +377,12 @@ export function renderPage(
 		const body = String(page.text ?? "").replace(/\s+$/g, "");
 		return body ? [{ heading: null, body }] : [];
 	}
-	const lines = buildLines(page.textItems ?? []);
+	const pageItems = page.textItems ?? [];
+	const pageW = Number(page.width ?? 612);
+	const lines =
+		(settings.autoDetectColumns &&
+			splitIntoColumns(pageItems, 0, pageW, settings)) ||
+		buildLines(pageItems);
 	const body = emitLines(lines, ctx);
 	return body ? [{ heading: null, body }] : [];
 }
@@ -361,6 +395,260 @@ export function pageNumberOf(page: RawPage, fallback: number): number {
 export function templatePageFilter(template: ParsingTemplate | null): Set<number> | null {
 	if (!template) return null;
 	return parsePageRangeSpec(template.pages);
+}
+
+// ── Probes (pre-classification) ──────────────────────────────────────────
+
+/**
+ * Read the text inside a probe rectangle in natural reading order.
+ * Returns "" if no items fall inside.
+ */
+function extractProbeText(probe: TemplateProbe, page: RawPage): string {
+	const items = page.textItems ?? [];
+	if (items.length === 0) return "";
+	const pageW = Number(page.width ?? 612);
+	const pageH = Number(page.height ?? 792);
+	const b = percentRectToPdfBounds(probe, pageW, pageH);
+	const inside = items.filter((it) => {
+		const c = itemCenter(it);
+		return c.x >= b.xMin && c.x <= b.xMax && c.y >= b.yMin && c.y <= b.yMax;
+	});
+	if (inside.length === 0) return "";
+	inside.sort((a, b) => {
+		const dy = itemY(a) - itemY(b);
+		if (Math.abs(dy) > 0.5) return dy;
+		return itemX(a) - itemX(b);
+	});
+	return inside.map(itemText).join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Evaluate a template's probes against a page. Returns the first matching
+ * probe's action, or null when no probe matches (or the template has none).
+ */
+function evaluateProbes(
+	template: ParsingTemplate,
+	page: RawPage,
+	debug: boolean,
+): ProbeAction | null {
+	const probes = template.probes;
+	if (!probes || probes.length === 0) return null;
+	const text = (() => {
+		// memoize the per-page extracted text per probe area (each probe has
+		// its own rect, so cache by probe ref)
+		const cache = new Map<TemplateProbe, string>();
+		return (probe: TemplateProbe) => {
+			const cached = cache.get(probe);
+			if (cached !== undefined) return cached;
+			const t = extractProbeText(probe, page);
+			cache.set(probe, t);
+			return t;
+		};
+	})();
+	for (const probe of probes) {
+		if (!probe || !probe.pattern) continue;
+		let re: RegExp;
+		try {
+			re = new RegExp(probe.pattern, probe.flags ?? "");
+		} catch (err) {
+			if (debug) console.debug("[liteparse-pdf-parser] probe regex invalid", probe.name, err);
+			continue;
+		}
+		const sample = text(probe);
+		if (re.test(sample)) {
+			if (debug) {
+				console.debug(
+					"[liteparse-pdf-parser] probe match",
+					template.name,
+					probe.name,
+					"=>",
+					probe.onMatch,
+				);
+			}
+			return probe.onMatch;
+		}
+	}
+	return null;
+}
+
+export interface ResolvedTemplate {
+	/** Effective template to apply, or null when the page should be skipped. */
+	template: ParsingTemplate | null;
+	/** True when probes resolved to a "skip page" action. */
+	skip: boolean;
+}
+
+/**
+ * Walk a probe-driven template chain for one page. Cycle-guarded; if a
+ * `switch` action points to a missing template or a cycle is detected,
+ * falls back to the last valid template.
+ */
+export function resolveEffectiveTemplate(
+	initial: ParsingTemplate | null,
+	page: RawPage,
+	allTemplates: ParsingTemplate[],
+	debug: boolean,
+): ResolvedTemplate {
+	if (!initial) return { template: null, skip: false };
+	const visited = new Set<string>();
+	let current: ParsingTemplate = initial;
+	for (let depth = 0; depth < 4; depth++) {
+		if (visited.has(current.name)) {
+			if (debug)
+				console.debug("[liteparse-pdf-parser] probe switch cycle, bailing on", current.name);
+			return { template: current, skip: false };
+		}
+		visited.add(current.name);
+		const action = evaluateProbes(current, page, debug);
+		if (!action) return { template: current, skip: false };
+		if (action.kind === "use-current") return { template: current, skip: false };
+		if (action.kind === "skip") return { template: null, skip: true };
+		if (action.kind === "switch") {
+			const next = allTemplates.find((t) => t && t.name === action.templateName);
+			if (!next) {
+				if (debug)
+					console.debug(
+						"[liteparse-pdf-parser] probe switch target missing",
+						action.templateName,
+					);
+				return { template: current, skip: false };
+			}
+			current = next;
+			continue;
+		}
+	}
+	if (debug) console.debug("[liteparse-pdf-parser] probe switch depth exceeded");
+	return { template: current, skip: false };
+}
+
+// ── Column auto-detect ───────────────────────────────────────────────────
+
+/**
+ * Try to recognize a two-column layout inside a scope of items and return
+ * lines in column reading order (full-width lines first, then column A, then
+ * column B). Returns null when the scope doesn't look like two columns; the
+ * caller should fall back to plain `buildLines`.
+ *
+ * Conservative gates (see plan):
+ *   - ≥ 6 items in scope
+ *   - ≥ 4 distinct y-bands
+ *   - a clean vertical gutter ≥ gutterMinPct wide in the middle 30–70% of
+ *     scope width that no item crosses, spanning ≥ 50% of the column items'
+ *     vertical extent
+ *   - full-width lines (x-span > fullWidthPct of scope) are emitted at top
+ *     to preserve titles
+ */
+function splitIntoColumns(
+	items: RawTextItem[],
+	scopeXMin: number,
+	scopeXMax: number,
+	settings: LiteParsePluginSettings,
+): ReflowLine[] | null {
+	if (items.length < 6) return null;
+	const scopeWidth = Math.max(1, scopeXMax - scopeXMin);
+	const fullWidthFrac = Math.max(0, Math.min(1, settings.columnFullWidthThresholdPct / 100));
+	const gutterFrac = Math.max(0.005, Math.min(0.5, settings.columnGutterMinPct / 100));
+
+	// Build candidate lines first so we can detect full-width lines.
+	const lines = buildLines(items);
+	if (lines.length < 4) return null;
+
+	const lineXSpan = (line: ReflowLine): { lo: number; hi: number } => {
+		let lo = Infinity;
+		let hi = -Infinity;
+		for (const it of line.items) {
+			const x = itemX(it);
+			const w = itemWidth(it);
+			if (x < lo) lo = x;
+			if (x + w > hi) hi = x + w;
+		}
+		return { lo, hi };
+	};
+
+	const fullWidthLines: ReflowLine[] = [];
+	const columnLines: ReflowLine[] = [];
+	for (const line of lines) {
+		const { lo, hi } = lineXSpan(line);
+		const span = hi - lo;
+		if (span / scopeWidth > fullWidthFrac) fullWidthLines.push(line);
+		else columnLines.push(line);
+	}
+	if (columnLines.length < 4) return null;
+
+	const columnItems: RawTextItem[] = [];
+	for (const line of columnLines) for (const it of line.items) columnItems.push(it);
+
+	let yLo = Infinity;
+	let yHi = -Infinity;
+	for (const it of columnItems) {
+		const y = itemY(it);
+		const h = itemHeight(it);
+		if (y < yLo) yLo = y;
+		if (y + h > yHi) yHi = y + h;
+	}
+	const verticalExtent = Math.max(1, yHi - yLo);
+
+	let bestGutterCenter = -1;
+	let bestGutterWidth = 0;
+	for (let pct = 30; pct <= 70; pct++) {
+		const centerX = scopeXMin + (pct / 100) * scopeWidth;
+		const halfBand = (gutterFrac * scopeWidth) / 2;
+		const bandLo = centerX - halfBand;
+		const bandHi = centerX + halfBand;
+		let crosses = false;
+		for (const it of columnItems) {
+			const ix = itemX(it);
+			const iw = itemWidth(it);
+			if (ix + iw > bandLo && ix < bandHi) {
+				crosses = true;
+				break;
+			}
+		}
+		if (crosses) continue;
+		// vertical coverage: how much of the columnItems' vertical extent is
+		// flanked by items on both sides of the gutter?
+		let leftYLo = Infinity;
+		let leftYHi = -Infinity;
+		let rightYLo = Infinity;
+		let rightYHi = -Infinity;
+		for (const it of columnItems) {
+			const cx = itemX(it) + itemWidth(it) / 2;
+			const y = itemY(it);
+			const yh = y + itemHeight(it);
+			if (cx < centerX) {
+				if (y < leftYLo) leftYLo = y;
+				if (yh > leftYHi) leftYHi = yh;
+			} else {
+				if (y < rightYLo) rightYLo = y;
+				if (yh > rightYHi) rightYHi = yh;
+			}
+		}
+		if (!Number.isFinite(leftYLo) || !Number.isFinite(rightYLo)) continue;
+		const overlap =
+			Math.max(0, Math.min(leftYHi, rightYHi) - Math.max(leftYLo, rightYLo)) /
+			verticalExtent;
+		if (overlap < 0.5) continue;
+		if (gutterFrac * scopeWidth > bestGutterWidth) {
+			bestGutterWidth = gutterFrac * scopeWidth;
+			bestGutterCenter = centerX;
+		}
+	}
+	if (bestGutterCenter < 0) return null;
+
+	const leftItems: RawTextItem[] = [];
+	const rightItems: RawTextItem[] = [];
+	for (const it of columnItems) {
+		const cx = itemX(it) + itemWidth(it) / 2;
+		if (cx < bestGutterCenter) leftItems.push(it);
+		else rightItems.push(it);
+	}
+	if (leftItems.length === 0 || rightItems.length === 0) return null;
+
+	const leftLines = buildLines(leftItems);
+	const rightLines = buildLines(rightItems);
+	if (leftLines.length === 0 || rightLines.length === 0) return null;
+
+	return [...fullWidthLines, ...leftLines, ...rightLines];
 }
 
 /**

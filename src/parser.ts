@@ -12,6 +12,7 @@ import {
 	pageNumberOf,
 	RawPage,
 	renderPage,
+	resolveEffectiveTemplate,
 	selectTemplate,
 	templatePageFilter,
 } from "./templates";
@@ -231,11 +232,10 @@ function renderMarkdownFromPages(
 	pdfVaultPath: string,
 	templateOverride: ParsingTemplate | null | undefined,
 ): string {
-	const template =
+	const autoMatched =
 		templateOverride === undefined
 			? selectTemplate(settings.templates, pdfVaultPath)
 			: templateOverride;
-	const templatePages = templatePageFilter(template);
 	const baseFontSize = computeBaseFontSize(pages);
 	const divider = (settings.pageDivider ?? "").trim();
 	interface Block {
@@ -247,7 +247,21 @@ function renderMarkdownFromPages(
 	for (const page of pages) {
 		idx++;
 		const num = pageNumberOf(page, idx);
-		const sections = renderPage(page, template, settings, baseFontSize, templatePages);
+		// Probes only run when no explicit template override was provided —
+		// the "choose template…" command must dispatch deterministically.
+		let pageTemplate: ParsingTemplate | null = autoMatched;
+		if (templateOverride === undefined && autoMatched) {
+			const resolved = resolveEffectiveTemplate(
+				autoMatched,
+				page,
+				settings.templates,
+				settings.debugLogging,
+			);
+			if (resolved.skip) continue;
+			pageTemplate = resolved.template;
+		}
+		const templatePages = templatePageFilter(pageTemplate);
+		const sections = renderPage(page, pageTemplate, settings, baseFontSize, templatePages);
 		if (sections.length === 0) continue;
 
 		const bodyParts: string[] = [];

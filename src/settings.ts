@@ -1,6 +1,13 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import LiteParsePlugin from "./main";
-import { ExtractionMode, OutputFormat, ParsingTemplate, TemplateRegion } from "./types";
+import {
+	ExtractionMode,
+	OutputFormat,
+	ParsingTemplate,
+	ProbeAction,
+	TemplateProbe,
+	TemplateRegion,
+} from "./types";
 import { VisualRegionEditorModal } from "./visualEditor";
 
 export class LiteParseSettingTab extends PluginSettingTab {
@@ -150,6 +157,22 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.collapseBlankLines).onChange(async (v) => {
 					this.plugin.settings.collapseBlankLines = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-detect two-column layouts")
+			.setDesc(
+				"When a page (or single body region) clearly contains two text " +
+				"columns separated by a vertical gutter, emit them in reading " +
+				"order — left column first, then right. Conservative gates avoid " +
+				"misfires on single-column pages. Manual two-include-region " +
+				"templates always override this.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.autoDetectColumns).onChange(async (v) => {
+					this.plugin.settings.autoDetectColumns = v;
 					await this.plugin.saveSettings();
 				}),
 			);
@@ -536,7 +559,184 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			};
 
 			this.renderRegionRows(card, tpl);
+			this.renderProbeRows(card, tpl);
 		});
+	}
+
+	private renderProbeRows(card: HTMLElement, tpl: ParsingTemplate): void {
+		const wrap = card.createDiv();
+		wrap.style.marginTop = "0.75rem";
+		const head = wrap.createDiv();
+		head.style.fontWeight = "600";
+		head.style.fontSize = "0.9em";
+		head.setText("Probes (optional pre-classification)");
+		const desc = wrap.createEl("p");
+		desc.style.fontSize = "0.8em";
+		desc.style.color = "var(--text-muted)";
+		desc.style.margin = "0.15rem 0 0.4rem 0";
+		desc.setText(
+			"Define a small page area, a regex to test against text in that " +
+			"area, and an action. First matching probe wins. Use to detect " +
+			"exceptional pages and skip them or dispatch to another template.",
+		);
+
+		const probes = tpl.probes ?? [];
+
+		const tbl = wrap.createEl("table");
+		tbl.style.width = "100%";
+		tbl.style.fontSize = "0.85em";
+		const thead = tbl.createEl("thead").createEl("tr");
+		for (const h of ["Name", "x", "y", "w", "h", "Pattern", "Flags", "On match", "Target", "↑", "↓", ""]) {
+			const th = thead.createEl("th", { text: h });
+			th.style.textAlign = "left";
+		}
+		const tbody = tbl.createEl("tbody");
+
+		const ensureProbes = (): TemplateProbe[] => {
+			if (!tpl.probes) tpl.probes = [];
+			return tpl.probes;
+		};
+
+		const drawRow = (probe: TemplateProbe, idx: number) => {
+			const tr = tbody.createEl("tr");
+			const mkInput = (
+				type: "text" | "number",
+				value: string,
+				width: string,
+				placeholder: string,
+				onChange: (v: string) => void,
+			) => {
+				const td = tr.createEl("td");
+				const input = td.createEl("input", { type });
+				input.value = value;
+				input.style.width = width;
+				input.placeholder = placeholder;
+				if (type === "number") input.step = "0.1";
+				input.onchange = () => onChange(input.value);
+				return input;
+			};
+
+			mkInput("text", probe.name, "8rem", "probe_1", async (v) => {
+				probe.name = v;
+				await this.plugin.saveSettings();
+			});
+			for (const k of ["x", "y", "w", "h"] as const) {
+				mkInput("number", String(probe[k]), "4rem", "", async (v) => {
+					const n = Number(v);
+					if (Number.isFinite(n)) {
+						probe[k] = n;
+						await this.plugin.saveSettings();
+					}
+				});
+			}
+			const patternInput = mkInput(
+				"text",
+				probe.pattern,
+				"10rem",
+				"^Exercise\\b",
+				async (v) => {
+					probe.pattern = v;
+					await this.plugin.saveSettings();
+				},
+			);
+			patternInput.style.fontFamily = "var(--font-monospace)";
+			const flagsInput = mkInput("text", probe.flags ?? "", "3rem", "i", async (v) => {
+				if (v) probe.flags = v;
+				else delete probe.flags;
+				await this.plugin.saveSettings();
+			});
+			flagsInput.style.fontFamily = "var(--font-monospace)";
+
+			const actionTd = tr.createEl("td");
+			const actionSel = actionTd.createEl("select");
+			actionSel.createEl("option", { text: "Use this template", value: "use-current" });
+			actionSel.createEl("option", { text: "Skip page", value: "skip" });
+			actionSel.createEl("option", { text: "Switch to…", value: "switch" });
+			actionSel.value = probe.onMatch.kind;
+
+			const targetTd = tr.createEl("td");
+			const renderTarget = () => {
+				targetTd.empty();
+				if (probe.onMatch.kind !== "switch") {
+					const span = targetTd.createSpan({ text: "—" });
+					span.style.color = "var(--text-muted)";
+					return;
+				}
+				const sel = targetTd.createEl("select");
+				const others = this.plugin.settings.templates
+					.map((t) => t.name)
+					.filter((n) => n && n !== tpl.name);
+				if (others.length === 0) {
+					sel.createEl("option", { text: "(no other templates)", value: "" });
+					sel.disabled = true;
+				} else {
+					sel.createEl("option", { text: "—", value: "" });
+					for (const name of others) sel.createEl("option", { text: name, value: name });
+					sel.value = (probe.onMatch as { templateName: string }).templateName ?? "";
+				}
+				sel.onchange = async () => {
+					probe.onMatch = { kind: "switch", templateName: sel.value };
+					await this.plugin.saveSettings();
+				};
+			};
+			renderTarget();
+
+			actionSel.onchange = async () => {
+				const kind = actionSel.value as ProbeAction["kind"];
+				if (kind === "skip") probe.onMatch = { kind: "skip" };
+				else if (kind === "use-current") probe.onMatch = { kind: "use-current" };
+				else probe.onMatch = { kind: "switch", templateName: "" };
+				await this.plugin.saveSettings();
+				renderTarget();
+			};
+
+			const upTd = tr.createEl("td");
+			const up = upTd.createEl("button", { text: "▲" });
+			up.onclick = async () => {
+				const arr = ensureProbes();
+				if (idx === 0) return;
+				[arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+				await this.plugin.saveSettings();
+				this.display();
+			};
+			const downTd = tr.createEl("td");
+			const down = downTd.createEl("button", { text: "▼" });
+			down.onclick = async () => {
+				const arr = ensureProbes();
+				if (idx >= arr.length - 1) return;
+				[arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+				await this.plugin.saveSettings();
+				this.display();
+			};
+
+			const delTd = tr.createEl("td");
+			const del = delTd.createEl("button", { text: "×" });
+			del.onclick = async () => {
+				const arr = ensureProbes();
+				arr.splice(idx, 1);
+				if (arr.length === 0) tpl.probes = undefined;
+				await this.plugin.saveSettings();
+				this.display();
+			};
+		};
+		probes.forEach(drawRow);
+
+		const addBtn = wrap.createEl("button", { text: "+ Probe" });
+		addBtn.style.marginTop = "0.3rem";
+		addBtn.onclick = async () => {
+			const arr = ensureProbes();
+			arr.push({
+				name: `probe_${arr.length + 1}`,
+				x: 0,
+				y: 0,
+				w: 30,
+				h: 8,
+				pattern: "",
+				onMatch: { kind: "use-current" },
+			});
+			await this.plugin.saveSettings();
+			this.display();
+		};
 	}
 
 	private renderRegionRows(card: HTMLElement, tpl: ParsingTemplate): void {
@@ -641,14 +841,22 @@ export class LiteParseSettingTab extends PluginSettingTab {
 		const visualBtn = btnRow.createEl("button", { text: "Edit visually…" });
 		visualBtn.onclick = () => {
 			const initialPdfPath = this.guessInitialPdfPath(tpl);
+			const siblings = this.plugin.settings.templates
+				.map((t) => t.name)
+				.filter((n) => n && n !== tpl.name);
 			new VisualRegionEditorModal(
 				this.app,
 				this.plugin,
 				tpl.regions,
-				async (regions) => {
+				tpl.probes ?? [],
+				siblings,
+				async ({ regions, probes }) => {
 					tpl.regions = regions;
+					tpl.probes = probes.length ? probes : undefined;
 					await this.plugin.saveSettings();
-					new Notice(`LiteParse: saved ${regions.length} region(s) for ${tpl.name}.`);
+					new Notice(
+						`LiteParse: saved ${regions.length} region(s) and ${probes.length} probe(s) for ${tpl.name}.`,
+					);
 					this.display();
 				},
 				initialPdfPath,

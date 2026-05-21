@@ -7,7 +7,7 @@ import {
 	resolvePluginPaths,
 } from "./installer";
 import LiteParsePlugin from "./main";
-import { TemplateRegion } from "./types";
+import { ProbeAction, TemplateProbe, TemplateRegion } from "./types";
 import { PdfFileSuggestModal } from "./suggestModals";
 
 interface DraftRegion {
@@ -19,6 +19,23 @@ interface DraftRegion {
 	wPct: number;
 	hPct: number;
 }
+
+interface DraftProbe {
+	id: number;
+	name: string;
+	xPct: number;
+	yPct: number;
+	wPct: number;
+	hPct: number;
+	pattern: string;
+	flags: string;
+	actionKind: "skip" | "use-current" | "switch";
+	targetTemplate: string;
+}
+
+type DrawingMode = "regions" | "probes";
+
+const PROBE_COLOR = "#d22dc4";
 
 let nextId = 1;
 
@@ -41,10 +58,17 @@ function colorForIndex(i: number): string {
 	return REGION_COLORS[i % REGION_COLORS.length];
 }
 
+export interface VisualEditorResult {
+	regions: TemplateRegion[];
+	probes: TemplateProbe[];
+}
+
 export class VisualRegionEditorModal extends Modal {
 	private readonly plugin: LiteParsePlugin;
-	private readonly onSave: (regions: TemplateRegion[]) => void;
+	private readonly onSave: (result: VisualEditorResult) => void;
 	private readonly initialRegions: TemplateRegion[];
+	private readonly initialProbes: TemplateProbe[];
+	private readonly siblingTemplateNames: string[];
 	private readonly initialPdfPath?: string;
 
 	private pdf: TFile | null = null;
@@ -55,22 +79,30 @@ export class VisualRegionEditorModal extends Modal {
 	private imgEl: HTMLImageElement | null = null;
 	private overlayEl: HTMLDivElement | null = null;
 	private listEl: HTMLDivElement | null = null;
+	private probeListEl: HTMLDivElement | null = null;
 	private statusEl: HTMLDivElement | null = null;
+	private roleSelectEl: HTMLSelectElement | null = null;
 
 	private regions: DraftRegion[] = [];
+	private probes: DraftProbe[] = [];
 	private currentRole: "include" | "exclude" = "exclude";
+	private mode: DrawingMode = "regions";
 
 	constructor(
 		app: App,
 		plugin: LiteParsePlugin,
 		initialRegions: TemplateRegion[],
-		onSave: (regions: TemplateRegion[]) => void,
+		initialProbes: TemplateProbe[],
+		siblingTemplateNames: string[],
+		onSave: (result: VisualEditorResult) => void,
 		initialPdfPath?: string,
 	) {
 		super(app);
 		this.plugin = plugin;
 		this.onSave = onSave;
 		this.initialRegions = initialRegions;
+		this.initialProbes = initialProbes;
+		this.siblingTemplateNames = siblingTemplateNames;
 		this.initialPdfPath = initialPdfPath;
 	}
 
@@ -87,6 +119,19 @@ export class VisualRegionEditorModal extends Modal {
 			yPct: r.y,
 			wPct: r.w,
 			hPct: r.h,
+		}));
+		this.probes = this.initialProbes.map((p) => ({
+			id: nextId++,
+			name: p.name,
+			xPct: p.x,
+			yPct: p.y,
+			wPct: p.w,
+			hPct: p.h,
+			pattern: p.pattern,
+			flags: p.flags ?? "",
+			actionKind: p.onMatch.kind,
+			targetTemplate:
+				p.onMatch.kind === "switch" ? p.onMatch.templateName : "",
 		}));
 
 		const ctrl = contentEl.createDiv();
@@ -108,11 +153,31 @@ export class VisualRegionEditorModal extends Modal {
 
 		const loadBtn = ctrl.createEl("button", { text: "Load page" });
 
+		ctrl.createSpan({ text: "Draw:" }).style.marginLeft = "0.75rem";
+		const modeSelect = ctrl.createEl("select");
+		modeSelect.createEl("option", { text: "Regions", value: "regions" });
+		modeSelect.createEl("option", { text: "Probes", value: "probes" });
+		modeSelect.value = this.mode;
+
 		const roleSelect = ctrl.createEl("select");
 		roleSelect.createEl("option", { text: "exclude", value: "exclude" });
 		roleSelect.createEl("option", { text: "include", value: "include" });
 		roleSelect.addEventListener("change", () => {
 			this.currentRole = roleSelect.value as "include" | "exclude";
+		});
+		this.roleSelectEl = roleSelect;
+
+		modeSelect.addEventListener("change", () => {
+			this.mode = modeSelect.value as DrawingMode;
+			if (this.roleSelectEl) {
+				this.roleSelectEl.style.display =
+					this.mode === "regions" ? "" : "none";
+			}
+			this.setStatus(
+				this.mode === "probes"
+					? "Probe mode. Drag a small area; set its regex + action below."
+					: `Region mode. Current role: ${this.currentRole}.`,
+			);
 		});
 
 		this.statusEl = contentEl.createDiv();
@@ -146,7 +211,14 @@ export class VisualRegionEditorModal extends Modal {
 
 		this.listEl = contentEl.createDiv();
 		this.listEl.style.marginTop = "0.5rem";
+
+		const probeHeader = contentEl.createEl("h4", { text: "Probes (pre-classification)" });
+		probeHeader.style.marginTop = "0.75rem";
+		probeHeader.style.marginBottom = "0.25rem";
+
+		this.probeListEl = contentEl.createDiv();
 		this.renderRegionList();
+		this.renderProbeList();
 
 		const btnRow = contentEl.createDiv();
 		btnRow.style.display = "flex";
@@ -181,7 +253,7 @@ export class VisualRegionEditorModal extends Modal {
 		};
 
 		saveBtn.onclick = () => {
-			const out: TemplateRegion[] = this.regions.map((r) => ({
+			const regions: TemplateRegion[] = this.regions.map((r) => ({
 				name: r.name,
 				role: r.role,
 				x: Math.round(r.xPct * 100) / 100,
@@ -189,7 +261,26 @@ export class VisualRegionEditorModal extends Modal {
 				w: Math.round(r.wPct * 100) / 100,
 				h: Math.round(r.hPct * 100) / 100,
 			}));
-			this.onSave(out);
+			const probes: TemplateProbe[] = this.probes.map((p) => {
+				const onMatch: ProbeAction =
+					p.actionKind === "skip"
+						? { kind: "skip" }
+						: p.actionKind === "switch" && p.targetTemplate
+							? { kind: "switch", templateName: p.targetTemplate }
+							: { kind: "use-current" };
+				const out: TemplateProbe = {
+					name: p.name,
+					x: Math.round(p.xPct * 100) / 100,
+					y: Math.round(p.yPct * 100) / 100,
+					w: Math.round(p.wPct * 100) / 100,
+					h: Math.round(p.hPct * 100) / 100,
+					pattern: p.pattern,
+					onMatch,
+				};
+				if (p.flags) out.flags = p.flags;
+				return out;
+			});
+			this.onSave({ regions, probes });
 			this.close();
 		};
 
@@ -322,6 +413,24 @@ export class VisualRegionEditorModal extends Modal {
 			const wd = Math.abs(x - startX);
 			const ht = Math.abs(y - startY);
 			if (wd < 1 || ht < 1) return; // ignore tiny clicks
+			if (this.mode === "probes") {
+				const probe: DraftProbe = {
+					id: nextId++,
+					name: `probe_${this.probes.length + 1}`,
+					xPct: lo,
+					yPct: to,
+					wPct: wd,
+					hPct: ht,
+					pattern: "",
+					flags: "",
+					actionKind: "use-current",
+					targetTemplate: "",
+				};
+				this.probes.push(probe);
+				this.renderProbeList();
+				this.renderRegionOverlays();
+				return;
+			}
 			const region: DraftRegion = {
 				id: nextId++,
 				name:
@@ -342,6 +451,8 @@ export class VisualRegionEditorModal extends Modal {
 
 	private rectEls: Map<number, HTMLDivElement> = new Map();
 	private rowEls: Map<number, HTMLTableRowElement> = new Map();
+	private probeRectEls: Map<number, HTMLDivElement> = new Map();
+	private probeRowEls: Map<number, HTMLTableRowElement> = new Map();
 
 	private renderRegionOverlays(): void {
 		if (!this.overlayEl) return;
@@ -349,6 +460,7 @@ export class VisualRegionEditorModal extends Modal {
 			.querySelectorAll(".liteparse-vis-rect")
 			.forEach((el) => el.remove());
 		this.rectEls.clear();
+		this.probeRectEls.clear();
 		this.regions.forEach((r, idx) => {
 			const div = this.overlayEl!.createDiv({ cls: "liteparse-vis-rect" });
 			div.style.position = "absolute";
@@ -380,7 +492,7 @@ export class VisualRegionEditorModal extends Modal {
 			label.style.pointerEvents = "none";
 
 			const hoverIn = () => {
-				div.style.background = `${color}33`; // ~20% alpha hex
+				div.style.background = `${color}33`;
 				div.style.zIndex = "10";
 				const row = this.rowEls.get(r.id);
 				if (row) row.style.background = `${color}1f`;
@@ -395,6 +507,195 @@ export class VisualRegionEditorModal extends Modal {
 			div.addEventListener("mouseleave", hoverOut);
 
 			this.rectEls.set(r.id, div);
+		});
+
+		this.probes.forEach((p) => {
+			const div = this.overlayEl!.createDiv({ cls: "liteparse-vis-rect" });
+			div.style.position = "absolute";
+			div.style.left = `${p.xPct}%`;
+			div.style.top = `${p.yPct}%`;
+			div.style.width = `${p.wPct}%`;
+			div.style.height = `${p.hPct}%`;
+			div.style.boxSizing = "border-box";
+			div.style.cursor = "pointer";
+			div.style.transition = "background 80ms ease, z-index 0s";
+			div.style.border = `2px dotted ${PROBE_COLOR}`;
+			div.style.background = "transparent";
+			div.style.zIndex = "2";
+			div.dataset.probeId = String(p.id);
+
+			const label = div.createDiv({ text: `probe: ${p.name}` });
+			label.style.position = "absolute";
+			label.style.top = "-1.05em";
+			label.style.left = "-2px";
+			label.style.padding = "0 4px";
+			label.style.background = PROBE_COLOR;
+			label.style.color = "#fff";
+			label.style.fontSize = "0.7em";
+			label.style.fontWeight = "600";
+			label.style.borderRadius = "2px 2px 0 0";
+			label.style.whiteSpace = "nowrap";
+			label.style.pointerEvents = "none";
+
+			const hoverIn = () => {
+				div.style.background = `${PROBE_COLOR}33`;
+				div.style.zIndex = "11";
+				const row = this.probeRowEls.get(p.id);
+				if (row) row.style.background = `${PROBE_COLOR}1f`;
+			};
+			const hoverOut = () => {
+				div.style.background = "transparent";
+				div.style.zIndex = "2";
+				const row = this.probeRowEls.get(p.id);
+				if (row) row.style.background = "";
+			};
+			div.addEventListener("mouseenter", hoverIn);
+			div.addEventListener("mouseleave", hoverOut);
+
+			this.probeRectEls.set(p.id, div);
+		});
+	}
+
+	private renderProbeList(): void {
+		if (!this.probeListEl) return;
+		this.probeListEl.empty();
+		const tbl = this.probeListEl.createEl("table");
+		tbl.style.width = "100%";
+		tbl.style.fontSize = "0.85em";
+		const thead = tbl.createEl("thead").createEl("tr");
+		for (const h of ["", "Name", "x", "y", "w", "h", "Pattern", "Flags", "Action", "Target", ""]) {
+			const th = thead.createEl("th", { text: h });
+			th.style.textAlign = "left";
+		}
+		const tbody = tbl.createEl("tbody");
+		this.probeRowEls.clear();
+		if (this.probes.length === 0) {
+			const tr = tbody.createEl("tr");
+			const td = tr.createEl("td");
+			td.colSpan = 11;
+			td.style.color = "var(--text-muted)";
+			td.setText(
+				"No probes. Switch Draw to Probes and drag a small area on the page to add one.",
+			);
+		}
+		this.probes.forEach((probe, idx) => {
+			const tr = tbody.createEl("tr");
+			tr.style.transition = "background 80ms ease";
+			this.probeRowEls.set(probe.id, tr);
+			tr.addEventListener("mouseenter", () => {
+				const rect = this.probeRectEls.get(probe.id);
+				if (rect) {
+					rect.style.background = `${PROBE_COLOR}33`;
+					rect.style.zIndex = "11";
+				}
+				tr.style.background = `${PROBE_COLOR}1f`;
+			});
+			tr.addEventListener("mouseleave", () => {
+				const rect = this.probeRectEls.get(probe.id);
+				if (rect) {
+					rect.style.background = "transparent";
+					rect.style.zIndex = "2";
+				}
+				tr.style.background = "";
+			});
+
+			const swatchTd = tr.createEl("td");
+			const sw = swatchTd.createSpan();
+			sw.style.display = "inline-block";
+			sw.style.width = "0.9em";
+			sw.style.height = "0.9em";
+			sw.style.borderRadius = "2px";
+			sw.style.background = PROBE_COLOR;
+
+			const nameTd = tr.createEl("td");
+			const nameInput = nameTd.createEl("input", { type: "text" });
+			nameInput.value = probe.name;
+			nameInput.style.width = "8rem";
+			nameInput.onchange = () => {
+				probe.name = nameInput.value;
+				this.renderRegionOverlays();
+			};
+
+			for (const k of ["xPct", "yPct", "wPct", "hPct"] as const) {
+				const td = tr.createEl("td");
+				const input = td.createEl("input", { type: "number" });
+				input.step = "0.1";
+				input.style.width = "4.5rem";
+				input.value = String(Math.round((probe[k] as number) * 100) / 100);
+				input.onchange = () => {
+					const n = Number(input.value);
+					if (Number.isFinite(n)) {
+						(probe as unknown as Record<string, number>)[k] = n;
+						this.renderRegionOverlays();
+					}
+				};
+			}
+
+			const patternTd = tr.createEl("td");
+			const patternInput = patternTd.createEl("input", { type: "text" });
+			patternInput.value = probe.pattern;
+			patternInput.placeholder = "^Exercise\\b";
+			patternInput.style.width = "10rem";
+			patternInput.style.fontFamily = "var(--font-monospace)";
+			patternInput.onchange = () => {
+				probe.pattern = patternInput.value;
+			};
+
+			const flagsTd = tr.createEl("td");
+			const flagsInput = flagsTd.createEl("input", { type: "text" });
+			flagsInput.value = probe.flags;
+			flagsInput.placeholder = "i";
+			flagsInput.style.width = "3rem";
+			flagsInput.style.fontFamily = "var(--font-monospace)";
+			flagsInput.onchange = () => {
+				probe.flags = flagsInput.value;
+			};
+
+			const actionTd = tr.createEl("td");
+			const actionSel = actionTd.createEl("select");
+			actionSel.createEl("option", { text: "Use this template", value: "use-current" });
+			actionSel.createEl("option", { text: "Skip page", value: "skip" });
+			actionSel.createEl("option", { text: "Switch to…", value: "switch" });
+			actionSel.value = probe.actionKind;
+
+			const targetTd = tr.createEl("td");
+			const renderTarget = () => {
+				targetTd.empty();
+				if (probe.actionKind !== "switch") {
+					const span = targetTd.createSpan({ text: "—" });
+					span.style.color = "var(--text-muted)";
+					return;
+				}
+				const sel = targetTd.createEl("select");
+				if (this.siblingTemplateNames.length === 0) {
+					sel.createEl("option", { text: "(no other templates)", value: "" });
+					sel.disabled = true;
+				} else {
+					sel.createEl("option", { text: "—", value: "" });
+					for (const name of this.siblingTemplateNames) {
+						sel.createEl("option", { text: name, value: name });
+					}
+					sel.value = probe.targetTemplate;
+				}
+				sel.onchange = () => {
+					probe.targetTemplate = sel.value;
+				};
+			};
+			renderTarget();
+
+			actionSel.onchange = () => {
+				probe.actionKind = actionSel.value as DraftProbe["actionKind"];
+				renderTarget();
+			};
+
+			const delTd = tr.createEl("td");
+			const delBtn = delTd.createEl("button", { text: "×" });
+			delBtn.onclick = () => {
+				this.probes = this.probes.filter((p) => p.id !== probe.id);
+				this.renderProbeList();
+				this.renderRegionOverlays();
+			};
+			void idx;
 		});
 	}
 
