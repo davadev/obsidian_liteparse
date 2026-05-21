@@ -1,5 +1,11 @@
 import { App, FuzzySuggestModal, TFile } from "obsidian";
-import { PdfLinkMatch } from "./types";
+import { ParsingTemplate, PdfLinkMatch } from "./types";
+
+/** Sentinel returned by TemplateChoiceSuggestModal. */
+export type TemplateChoice =
+	| { kind: "auto" }
+	| { kind: "none" }
+	| { kind: "template"; template: ParsingTemplate };
 
 export class PdfFileSuggestModal extends FuzzySuggestModal<TFile> {
 	private readonly files: TFile[];
@@ -46,6 +52,41 @@ export class NoteSuggestModal extends FuzzySuggestModal<TFile> {
 
 	onChooseItem(file: TFile): void {
 		this.onChoose(file);
+	}
+}
+
+export class TemplateChoiceSuggestModal extends FuzzySuggestModal<TemplateChoice> {
+	private readonly choices: TemplateChoice[];
+	private readonly onChoose: (c: TemplateChoice) => void;
+
+	constructor(
+		app: App,
+		templates: ParsingTemplate[],
+		onChoose: (c: TemplateChoice) => void,
+	) {
+		super(app);
+		const items: TemplateChoice[] = [
+			{ kind: "auto" },
+			{ kind: "none" },
+			...templates.map<TemplateChoice>((t) => ({ kind: "template", template: t })),
+		];
+		this.choices = items;
+		this.onChoose = onChoose;
+		this.setPlaceholder("Pick a parsing template");
+	}
+
+	getItems(): TemplateChoice[] {
+		return this.choices;
+	}
+
+	getItemText(c: TemplateChoice): string {
+		if (c.kind === "auto") return "Auto — match by regex";
+		if (c.kind === "none") return "None — no template";
+		return `${c.template.name}    (match: ${c.template.match})`;
+	}
+
+	onChooseItem(c: TemplateChoice): void {
+		this.onChoose(c);
 	}
 }
 

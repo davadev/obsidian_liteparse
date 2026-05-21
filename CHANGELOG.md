@@ -6,6 +6,21 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-21
+
+### Added
+
+- **Explicit template picker.** New file-menu item
+  "Parse PDF with LiteParse (choose template)…" (shown when at least
+  one template is defined) and new command palette entry of the same
+  name. Both open a fuzzy-suggest modal listing all defined templates
+  plus two sentinels — *Auto — match by regex* (default behavior) and
+  *None — no template* (skip region filtering for this parse).
+- `parsePdf` accepts an optional `templateOverride` argument:
+  - `undefined` (default) → auto-match templates via `match` regex.
+  - `null` → force no template.
+  - a `ParsingTemplate` → use this template, bypassing regex match.
+
 ## [0.2.0] - 2026-05-21
 
 ### Added

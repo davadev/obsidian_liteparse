@@ -1,6 +1,6 @@
 import { FileSystemAdapter, Plugin, TFile, Vault } from "obsidian";
 import { spawn } from "child_process";
-import { LiteParsePluginSettings } from "./types";
+import { LiteParsePluginSettings, ParsingTemplate } from "./types";
 import {
 	augmentedPath,
 	ensureLiteParse,
@@ -164,8 +164,12 @@ function renderMarkdownFromPages(
 	pages: RawPage[],
 	settings: LiteParsePluginSettings,
 	pdfVaultPath: string,
+	templateOverride: ParsingTemplate | null | undefined,
 ): string {
-	const template = selectTemplate(settings.templates, pdfVaultPath);
+	const template =
+		templateOverride === undefined
+			? selectTemplate(settings.templates, pdfVaultPath)
+			: templateOverride;
 	const templatePages = templatePageFilter(template);
 	const divider = (settings.pageDivider ?? "").trim();
 	const blocks: string[] = [];
@@ -198,6 +202,7 @@ export async function parsePdf(
 	absolutePath: string,
 	pdfVaultPath: string,
 	settings: LiteParsePluginSettings,
+	templateOverride?: ParsingTemplate | null,
 ): Promise<NormalizedParseResult> {
 	const paths = await ensureLiteParse(plugin, settings.debugLogging);
 	const args = buildCliArgs(absolutePath, settings);
@@ -227,7 +232,7 @@ export async function parsePdf(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const r: any = parsed;
 	const pages: RawPage[] = Array.isArray(r.pages) ? r.pages : [];
-	const markdown = renderMarkdownFromPages(pages, settings, pdfVaultPath);
+	const markdown = renderMarkdownFromPages(pages, settings, pdfVaultPath, templateOverride);
 	const text: string =
 		typeof r.text === "string"
 			? r.text
