@@ -6,6 +6,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-21
+
+### Fixed
+
+- Parsing now spawns the LiteParse CLI (`node …/dist/src/index.js parse
+  <pdf> --format json`) as a subprocess and reads JSON from stdout. The
+  previous approach (dynamic `import(fileURL)` from inside Obsidian's
+  renderer process) failed with "Failed to fetch dynamically imported
+  module" because Electron's renderer treats `import()` as a web fetch
+  and refuses `file://` URLs. The subprocess approach sidesteps the
+  renderer ESM trap completely and keeps LiteParse crashes out of the
+  Obsidian process.
+
 ## [0.1.1] - 2026-05-21
 
 ### Added

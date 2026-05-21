@@ -2,25 +2,14 @@ import { FileSystemAdapter, Notice, Plugin } from "obsidian";
 import { spawn } from "child_process";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { pathToFileURL } from "url";
 
 const LITEPARSE_PKG = "@llamaindex/liteparse";
-
-/**
- * Real ESM dynamic import that esbuild cannot statically rewrite into a
- * CommonJS require(). LiteParse is `"type": "module"` with top-level await,
- * so it MUST be loaded via Node's native ESM loader at runtime.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dynamicImport: (s: string) => Promise<any> = new Function(
-	"s",
-	"return import(s)",
-) as never;
 
 export interface PluginPaths {
 	pluginDir: string;
 	nodeModules: string;
 	liteparseEntry: string;
+	liteparseCli: string;
 }
 
 export function resolvePluginPaths(plugin: Plugin): PluginPaths {
@@ -34,27 +23,22 @@ export function resolvePluginPaths(plugin: Plugin): PluginPaths {
 	}
 	const pluginDir = adapter.getFullPath(rel);
 	const nodeModules = join(pluginDir, "node_modules");
-	const liteparseEntry = join(
-		nodeModules,
-		"@llamaindex",
-		"liteparse",
-		"dist",
-		"src",
-		"lib.js",
-	);
-	return { pluginDir, nodeModules, liteparseEntry };
+	const liteparseRoot = join(nodeModules, "@llamaindex", "liteparse");
+	const liteparseEntry = join(liteparseRoot, "dist", "src", "lib.js");
+	const liteparseCli = join(liteparseRoot, "dist", "src", "index.js");
+	return { pluginDir, nodeModules, liteparseEntry, liteparseCli };
 }
 
 export function isLiteParseInstalled(paths: PluginPaths): boolean {
-	return existsSync(paths.liteparseEntry);
+	return existsSync(paths.liteparseCli);
 }
 
 /**
- * Augment PATH with the typical locations where npm lives on macOS/Linux
+ * Augment PATH with the typical locations where node/npm live on macOS/Linux
  * when Obsidian is launched from the GUI (where the user shell's PATH is
  * not inherited).
  */
-function augmentedPath(): string {
+export function augmentedPath(): string {
 	const sep = process.platform === "win32" ? ";" : ":";
 	const current = process.env.PATH ?? "";
 	const extras =
@@ -128,6 +112,10 @@ function npmCommand(): string {
 	return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
+export function nodeCommand(): string {
+	return process.platform === "win32" ? "node.exe" : "node";
+}
+
 export interface InstallProgress {
 	(message: string): void;
 }
@@ -173,24 +161,13 @@ export async function installLiteParse(
 }
 
 /**
- * Import LiteParse from the plugin folder via Node's native ESM loader.
- */
-export async function importLiteParse(paths: PluginPaths): Promise<unknown> {
-	const url = pathToFileURL(paths.liteparseEntry).href;
-	const mod = await dynamicImport(url);
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const m: any = mod;
-	return m.LiteParse ?? m.default?.LiteParse ?? m.default ?? m;
-}
-
-/**
  * Ensure LiteParse is installed in the plugin folder, installing it on the
- * fly if needed, then return the LiteParse class.
+ * fly if needed. Returns the resolved paths so callers can invoke the CLI.
  */
 export async function ensureLiteParse(
 	plugin: Plugin,
 	debug: boolean,
-): Promise<unknown> {
+): Promise<PluginPaths> {
 	const paths = resolvePluginPaths(plugin);
 	if (!isLiteParseInstalled(paths)) {
 		const notice = new Notice(
@@ -210,5 +187,5 @@ export async function ensureLiteParse(
 			throw err;
 		}
 	}
-	return importLiteParse(paths);
+	return paths;
 }
