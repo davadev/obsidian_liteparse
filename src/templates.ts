@@ -304,7 +304,11 @@ function emitLines(lines: ReflowLine[], ctx: RenderContext): string {
 			const curY = line.items.reduce((s, it) => s + itemY(it), 0) / line.items.length;
 			const gap = curY - prevY;
 			const prevH = prevLine.items.reduce((m, it) => Math.max(m, itemHeight(it)), 0) || 10;
-			if (gap > Math.max(prevH * 1.6, 14)) out.push("");
+			// 2.0 (vs the old 1.6) avoids inserting a blank line between
+			// table rows where the y-spacing tends to be ~1.8× the cell
+			// font height. Real paragraph breaks in body prose typically
+			// have gap ≥ 2× line-height, so 2.0 still catches them.
+			if (gap > Math.max(prevH * 2.0, 14)) out.push("");
 		}
 		out.push(rendered);
 		prevLine = line;
@@ -665,18 +669,22 @@ function splitIntoColumns(
 	const fullItems: RawTextItem[] = [];
 	for (const it of items) {
 		// Heading-sized items (slide titles, full-width subheadings) always
-		// emit above the columns regardless of x-position. Otherwise a
-		// narrow title sitting in the left column would emit somewhere in
-		// the middle of the left column flow.
+		// emit above the columns regardless of x-position.
 		const itemSize = itemFontSize(it) || itemHeight(it);
 		if (itemSize >= headingThreshold) {
 			fullItems.push(it);
 			continue;
 		}
+		// Classify by item CENTER vs gutter. An item whose center sits on
+		// the left side of the gutter belongs to the left column even if
+		// its right edge extends slightly past gutterLo (common for body
+		// paragraph items that taper into the column gutter). Items whose
+		// center is inside the gutter band are treated as full-width
+		// content (titles, separator dots, etc.).
 		const ix1 = itemX(it);
-		const ix2 = ix1 + itemWidth(it);
-		if (ix2 <= gutterLo + 0.5) leftItems.push(it);
-		else if (ix1 >= gutterHi - 0.5) rightItems.push(it);
+		const cx = ix1 + itemWidth(it) / 2;
+		if (cx < gutterLo) leftItems.push(it);
+		else if (cx > gutterHi) rightItems.push(it);
 		else fullItems.push(it);
 	}
 	if (leftItems.length === 0 || rightItems.length === 0) return null;

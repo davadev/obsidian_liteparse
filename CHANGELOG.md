@@ -6,6 +6,32 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-05-21
+
+### Fixed
+
+- **Body items extending past the gutter no longer emit above the
+  column.** Previously, an item whose horizontal extent crossed any
+  fraction of the detected gutter was classified as "full-width" and
+  emitted before the column body. On a TUGraz AI-1 slide, the body
+  line "30% - 5% per Test (6" (x=56–243, gutter at x=208) qualified
+  as a straddler and ended up emitting before "times)" (its visual
+  wrap on the next line). Reading order broken.
+
+  Items are now classified by their CENTER vs the gutter band, not by
+  any-overlap of their x-extent. Center on the left side of the
+  gutter → left column, even if the item's right edge extends a few
+  points past gutterLo. Only items whose center actually falls inside
+  the gutter (true full-width content like titles and separator
+  glyphs) go to fullItems.
+
+- **No more blank lines between table rows.** `emitLines`'s
+  paragraph-break heuristic compared `gap > prevH × 1.6`. Table rows
+  in a 16pt cell font with 29pt y-spacing satisfied 29 > 25.6 → blank
+  inserted between every row. Multiplier raised to **2.0** so table
+  rows (gap/h ≈ 1.8) stay consecutive, while real paragraph breaks
+  (gap/h ≥ 2.0) still emit a blank line.
+
 ## [0.7.3] - 2026-05-21
 
 ### Changed
