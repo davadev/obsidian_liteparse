@@ -1,6 +1,6 @@
 {
   "name": "liteparse-pdf-parser",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Obsidian plugin that wraps LiteParse (by Run Llama / LlamaIndex) to parse PDFs inside Obsidian.",
   "private": true,
   "main": "main.js",

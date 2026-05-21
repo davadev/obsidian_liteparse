@@ -45,7 +45,14 @@ interface RenderContext {
 	mode: "reflow" | "raw";
 	templatePages: Set<number> | null;
 	baseFontSize: number;
+	pageBaseFontSize: number;
 	settings: LiteParsePluginSettings;
+}
+
+/** Resolve which font-size median heading detection should compare against. */
+function resolveBaseFontSize(ctx: RenderContext): number {
+	if (ctx.settings.headingFontReference === "document") return ctx.baseFontSize;
+	return ctx.pageBaseFontSize > 0 ? ctx.pageBaseFontSize : ctx.baseFontSize;
 }
 
 function itemX(item: RawTextItem): number {
@@ -261,15 +268,14 @@ function applyLineMarkup(line: ReflowLine, ctx: RenderContext): string | null {
 	}
 
 	// Heading detection — emit `## title` / `### title` for short, large lines.
+	const base = resolveBaseFontSize(ctx);
 	if (
 		settings.detectHeadings &&
-		ctx.baseFontSize > 0 &&
-		line.maxFontSize >= ctx.baseFontSize * settings.headingFontMultiplier
+		base > 0 &&
+		line.maxFontSize >= base * settings.headingFontMultiplier
 	) {
-		const ratio = line.maxFontSize / ctx.baseFontSize;
+		const ratio = line.maxFontSize / base;
 		const words = text.split(/\s+/).length;
-		// only treat as heading if the line is short — avoids "headlining"
-		// every large body line
 		if (words <= 14) {
 			const level = ratio >= settings.headingFontMultiplier * 1.25 ? 2 : 3;
 			return `${"#".repeat(level + 1)} ${text}`;
@@ -330,7 +336,7 @@ function applyTemplateToPage(
 
 	if (includeRects.length === 0) {
 		const lines =
-			(tryColumns && splitIntoColumns(survivors, 0, pageW, ctx.settings, ctx.baseFontSize)) ||
+			(tryColumns && splitIntoColumns(survivors, 0, pageW, ctx.settings, resolveBaseFontSize(ctx))) ||
 			buildLines(survivors);
 		const body = emitLines(lines, ctx);
 		return body ? [{ heading: null, body }] : [];
@@ -343,7 +349,7 @@ function applyTemplateToPage(
 		const eligibleForColumns = tryColumns && rectWidthFrac >= 0.6;
 		const lines =
 			(eligibleForColumns &&
-				splitIntoColumns(inside, rect.xMin, rect.xMax, ctx.settings, ctx.baseFontSize)) ||
+				splitIntoColumns(inside, rect.xMin, rect.xMax, ctx.settings, resolveBaseFontSize(ctx))) ||
 			buildLines(inside);
 		const body = emitLines(lines, ctx);
 		if (!body) continue;
@@ -367,6 +373,7 @@ export function renderPage(
 		mode: settings.extractionMode,
 		templatePages,
 		baseFontSize,
+		pageBaseFontSize: computePageBaseFontSize(page),
 		settings,
 	};
 	const num = Number(page.page ?? page.pageNum ?? 0);
@@ -381,7 +388,7 @@ export function renderPage(
 	const pageW = Number(page.width ?? 612);
 	const lines =
 		(settings.autoDetectColumns &&
-			splitIntoColumns(pageItems, 0, pageW, settings, baseFontSize)) ||
+			splitIntoColumns(pageItems, 0, pageW, settings, resolveBaseFontSize(ctx))) ||
 		buildLines(pageItems);
 	const body = emitLines(lines, ctx);
 	return body ? [{ heading: null, body }] : [];
@@ -683,6 +690,22 @@ function splitIntoColumns(
 	const rightLines = buildLines(rightItems);
 
 	return [...fullLines, ...leftLines, ...rightLines];
+}
+
+/**
+ * Median font size of a single page's text items. Used when
+ * `headingFontReference === "page"`. Robust against outlier slides
+ * where the body font is much larger than the document average.
+ */
+function computePageBaseFontSize(page: RawPage): number {
+	const sizes: number[] = [];
+	for (const it of page.textItems ?? []) {
+		const s = itemFontSize(it);
+		if (s > 0) sizes.push(s);
+	}
+	if (sizes.length === 0) return 0;
+	sizes.sort((a, b) => a - b);
+	return sizes[Math.floor(sizes.length / 2)];
 }
 
 /**

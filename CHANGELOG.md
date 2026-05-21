@@ -6,6 +6,35 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-05-21
+
+### Changed
+
+- **Heading detection now defaults to per-page median.** A TUGraz
+  AI-1 slide ("Please communicate special needs in time") had body
+  text at ~28pt — much larger than the document-wide median (~14pt
+  driven by other slides). The pre-0.7.3 threshold
+  `document_median × 1.3 = 18.2pt` flagged every line on that slide
+  as a heading. Per-page median (28pt for that slide) with a slightly
+  lower multiplier (1.15) gives a threshold of 32.2pt — title (36pt)
+  still detected as heading, body (28pt) correctly treated as body.
+
+  Default multiplier lowered to **1.15** to match the more aggressive
+  per-page base. Users who liked the 1.3 setting should keep that
+  number AND switch the new reference setting to `document` for
+  pre-0.7.3 behavior.
+
+### Added
+
+- New setting **Heading base font reference**: `page` (default) or
+  `document`. Lets users opt back into the global-median approach
+  for documents with consistent fonts across pages where
+  cross-page heading-level consistency matters more than handling
+  outlier slides.
+- `splitIntoColumns` title-promotion (heading-sized items → full-width)
+  also now uses the resolved base, so the column algorithm and the
+  heading-emission both agree on what counts as a heading.
+
 ## [0.7.2] - 2026-05-21
 
 ### Fixed

@@ -98,6 +98,16 @@ export interface LiteParsePluginSettings {
 	detectBoldItalic: boolean;
 	detectHeadings: boolean;
 	headingFontMultiplier: number;
+	/**
+	 * Which font-size median is used as the base for heading detection.
+	 * - "page"     : median of the current page only — robust on documents
+	 *                 with wildly different fonts per page (e.g. one slide
+	 *                 with 28pt body vs other slides at 14pt).
+	 * - "document" : median of every text item in the document (pre-0.7.3
+	 *                 behavior; consistent levels but breaks on outlier
+	 *                 slides).
+	 */
+	headingFontReference: "page" | "document";
 	promoteTitleSlides: boolean;
 	mergeConsecutiveHeadings: boolean;
 	singleContentMode: boolean;
@@ -139,7 +149,8 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	bulletReplacement: "-",
 	detectBoldItalic: true,
 	detectHeadings: true,
-	headingFontMultiplier: 1.3,
+	headingFontMultiplier: 1.15,
+	headingFontReference: "page",
 	promoteTitleSlides: true,
 	mergeConsecutiveHeadings: true,
 	singleContentMode: false,

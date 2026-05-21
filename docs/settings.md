@@ -32,7 +32,8 @@ Defaults reflect `DEFAULT_SETTINGS` in `src/types.ts`.
 | Bullet replacement | `-` | Replace unsupported bullet glyphs at line start with this marker (plus space). Empty disables replacement. |
 | Detect bold / italic | `true` | Wrap full lines in markdown emphasis when all line items indicate bold/italic font styling. |
 | Detect headings | `true` | Promote short large-font lines to markdown headings. |
-| Heading size multiplier | `1.3` | Heading candidate threshold is median font size multiplied by this value. |
+| Heading size multiplier | `1.15` | Heading candidate threshold is base font size multiplied by this value. |
+| Heading base font reference | `page` | `page` compares against the current page's median (robust on documents with varied per-page fonts); `document` compares against the global median (consistent levels but breaks on outlier slides). |
 | Promote title-only slides | `true` | Pages made only of heading-like lines become `## Title` blocks. Disabled when single-content mode is on. |
 | Merge consecutive same-level headings | `true` | Joins adjacent same-level headings (including across blank lines). |
 

@@ -223,15 +223,36 @@ export class LiteParseSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Heading size multiplier")
-			.setDesc("A line whose font size is at least (median × this) is a heading candidate. Default 1.3.")
+			.setDesc("A line whose font size is at least (base font × this) is a heading candidate. Default 1.15 with page-relative base, 1.3 with document-relative base.")
 			.addText((t) =>
 				t
-					.setPlaceholder("1.3")
+					.setPlaceholder("1.15")
 					.setValue(String(this.plugin.settings.headingFontMultiplier))
 					.onChange(async (v) => {
 						const n = Number(v);
 						this.plugin.settings.headingFontMultiplier =
-							Number.isFinite(n) && n > 1 ? n : 1.3;
+							Number.isFinite(n) && n > 1 ? n : 1.15;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Heading base font reference")
+			.setDesc(
+				"Which median font size the heading-size multiplier compares against. " +
+				"'Page' uses the current page's median — robust on documents with " +
+				"different fonts per page (e.g. one slide with 28pt body vs others " +
+				"at 14pt). 'Document' uses the global median — consistent heading " +
+				"levels but flags body text on outlier slides as headings.",
+			)
+			.addDropdown((d) =>
+				d
+					.addOption("page", "Page median (recommended)")
+					.addOption("document", "Document median")
+					.setValue(this.plugin.settings.headingFontReference)
+					.onChange(async (v) => {
+						this.plugin.settings.headingFontReference =
+							v === "document" ? "document" : "page";
 						await this.plugin.saveSettings();
 					}),
 			);
