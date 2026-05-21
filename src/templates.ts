@@ -542,25 +542,22 @@ export function resolveEffectiveTemplate(
  * Detect a two-column layout via whitespace projection.
  *
  * Algorithm:
- *  1. Bucket the x-axis (0.5% steps). For each bucket, sum the y-heights
- *     of items that horizontally overlap it. This is the "fill" histogram.
- *  2. Buckets whose fill is < `coverageEmptyFrac` of scope height (default
- *     25%) are "empty". Find the longest contiguous empty run in the
- *     middle 20–80% of the scope width. That's the column gutter.
- *  3. Items entirely left of the gutter → left column.
+ *  1. Rasterize items onto a 100×50 grid covering the scope (x × y).
+ *     Each cell is "filled" if at least one item overlaps it.
+ *  2. For each x bucket, compute coverage = (filled y-cells) / 50.
+ *     A real column's coverage is 0.6–0.9; a gutter that only sees
+ *     occasional titles crossing is ~0.05–0.10. Threshold at 0.20.
+ *  3. Find the longest contiguous run of low-coverage buckets in the
+ *     middle 20–80% of the scope. That's the column gutter.
+ *  4. Items entirely left of the gutter → left column.
  *     Items entirely right of the gutter → right column.
- *     Items whose horizontal extent crosses the gutter → full-width
- *     (titles, subheadings) — emit at top.
- *  4. Output: full-width lines (y-order), then full left column, then
- *     full right column. Matches reading order for slides where the
- *     title sits above two text columns.
+ *     Items straddling → full-width (titles, subheadings) — emit first.
  *
- * Why this beats the previous "≥60% width = full-width" rule: gutter
- * detection is now driven by the actual whitespace the document
- * designer left, not by an arbitrary width threshold. A title that
- * spans 60% width adds only its own line height (~5% scope height) to
- * the gutter buckets — still below 25% empty cutoff — so it doesn't
- * break gutter detection.
+ * The 2D rasterization (vs the v0.7.0 sum-of-heights metric) makes
+ * coverage robust against sparse columns: 4 bullet lines spread across
+ * the column's height still register as ~30% coverage even though
+ * their accumulated height is only ~5% of scope. v0.7.0 misclassified
+ * sparse columns as gutter, scrambling reading order.
  */
 function splitIntoColumns(
 	items: RawTextItem[],
@@ -584,38 +581,51 @@ function splitIntoColumns(
 	if (!Number.isFinite(yLo) || !Number.isFinite(yHi)) return null;
 	const scopeHeight = Math.max(1, yHi - yLo);
 
-	const STEPS = 200;
-	const bucketW = scopeWidth / STEPS;
-	const filled = new Array(STEPS).fill(0);
+	const X_STEPS = 100;
+	const Y_STEPS = 50;
+	const xBucketW = scopeWidth / X_STEPS;
+	const yBucketH = scopeHeight / Y_STEPS;
+	const grid = new Uint8Array(X_STEPS * Y_STEPS);
+
 	for (const it of items) {
 		const ix = itemX(it);
 		const iw = itemWidth(it);
+		const iy = itemY(it);
 		const ih = itemHeight(it);
 		if (ih === 0) continue;
-		const bStart = Math.max(0, Math.min(STEPS - 1, Math.floor((ix - scopeXMin) / bucketW)));
-		const bEnd = Math.max(0, Math.min(STEPS - 1, Math.floor((ix + iw - scopeXMin) / bucketW)));
-		for (let b = bStart; b <= bEnd; b++) filled[b] += ih;
+		const bxs = Math.max(0, Math.min(X_STEPS - 1, Math.floor((ix - scopeXMin) / xBucketW)));
+		const bxe = Math.max(0, Math.min(X_STEPS - 1, Math.floor((ix + iw - scopeXMin) / xBucketW)));
+		const bys = Math.max(0, Math.min(Y_STEPS - 1, Math.floor((iy - yLo) / yBucketH)));
+		const bye = Math.max(0, Math.min(Y_STEPS - 1, Math.floor((iy + ih - yLo) / yBucketH)));
+		for (let bx = bxs; bx <= bxe; bx++) {
+			for (let by = bys; by <= bye; by++) {
+				grid[by * X_STEPS + bx] = 1;
+			}
+		}
 	}
 
-	// A bucket is "empty" if its accumulated item height is below 25% of
-	// the scope's vertical extent. Titles crossing the gutter contribute
-	// roughly one line height (~5%) per bucket — well under 25%. A real
-	// column's text contributes 60–90%. Threshold is hardcoded as it
-	// reflects a structural property of the page, not a tunable.
-	const emptyThreshold = scopeHeight * 0.25;
+	const coverage = new Array<number>(X_STEPS);
+	for (let bx = 0; bx < X_STEPS; bx++) {
+		let count = 0;
+		for (let by = 0; by < Y_STEPS; by++) {
+			if (grid[by * X_STEPS + bx]) count++;
+		}
+		coverage[bx] = count / Y_STEPS;
+	}
 
-	const minB = Math.floor(STEPS * 0.2);
-	const maxB = Math.floor(STEPS * 0.8);
+	const EMPTY_COVERAGE = 0.2;
+	const minBx = Math.floor(X_STEPS * 0.2);
+	const maxBx = Math.floor(X_STEPS * 0.8);
 
 	let bestStart = -1;
 	let bestLen = 0;
 	let curStart = -1;
-	for (let b = minB; b <= maxB; b++) {
-		if (filled[b] < emptyThreshold) {
-			if (curStart < 0) curStart = b;
+	for (let bx = minBx; bx <= maxBx; bx++) {
+		if (coverage[bx] < EMPTY_COVERAGE) {
+			if (curStart < 0) curStart = bx;
 		} else {
 			if (curStart >= 0) {
-				const len = b - curStart;
+				const len = bx - curStart;
 				if (len > bestLen) {
 					bestLen = len;
 					bestStart = curStart;
@@ -625,7 +635,7 @@ function splitIntoColumns(
 		}
 	}
 	if (curStart >= 0) {
-		const len = maxB + 1 - curStart;
+		const len = maxBx + 1 - curStart;
 		if (len > bestLen) {
 			bestLen = len;
 			bestStart = curStart;
@@ -634,12 +644,12 @@ function splitIntoColumns(
 
 	if (bestLen === 0) return null;
 
-	const gutterWidth = bestLen * bucketW;
+	const gutterWidth = bestLen * xBucketW;
 	const minGutterPct = Math.max(0.5, Math.min(20, settings.columnGutterMinPct));
 	if (gutterWidth < scopeWidth * (minGutterPct / 100)) return null;
 
-	const gutterLo = scopeXMin + bestStart * bucketW;
-	const gutterHi = scopeXMin + (bestStart + bestLen) * bucketW;
+	const gutterLo = scopeXMin + bestStart * xBucketW;
+	const gutterHi = scopeXMin + (bestStart + bestLen) * xBucketW;
 
 	const leftItems: RawTextItem[] = [];
 	const rightItems: RawTextItem[] = [];
@@ -652,6 +662,10 @@ function splitIntoColumns(
 		else fullItems.push(it);
 	}
 	if (leftItems.length === 0 || rightItems.length === 0) return null;
+
+	// Both columns need enough content to actually be columns — otherwise
+	// what we detected was probably a real white margin, not a gutter.
+	if (leftItems.length < 3 || rightItems.length < 3) return null;
 
 	const fullLines = buildLines(fullItems);
 	const leftLines = buildLines(leftItems);

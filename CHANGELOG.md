@@ -6,6 +6,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-05-21
+
+### Fixed
+
+- **Sparse columns no longer misclassified as gutter.** 0.7.0 used
+  sum-of-item-heights / scope-height as the per-bucket coverage metric.
+  A column with sparse content (e.g. 4 bullet lines spread across the
+  column's height) accumulates ~150pt of heights vs ~680pt scope ≈ 22%
+  — below the 25% empty threshold. The detector then classified the
+  column itself as part of the gutter, items there became "full-width",
+  and reading order was scrambled.
+- New coverage metric: rasterize items onto a 100×50 grid covering the
+  scope and, for each x bucket, count what fraction of y-cells contain
+  at least one item. A column's text fills 60–90% of its y-extent;
+  a true gutter sees only occasional titles crossing (5–10%). Threshold
+  at 20% cleanly separates them regardless of how dense the column is.
+- Added "both columns need ≥3 items" sanity gate to avoid splitting
+  pages with a single big margin on one side.
+
 ## [0.7.0] - 2026-05-21
 
 ### Changed
