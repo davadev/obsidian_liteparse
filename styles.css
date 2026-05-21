@@ -20,3 +20,8 @@
 	padding-top: 0.5rem;
 	border-top: 1px solid var(--background-modifier-border);
 }
+
+.liteparse-setting-disabled {
+	opacity: 0.45;
+	pointer-events: none;
+}

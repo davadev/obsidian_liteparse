@@ -62,6 +62,8 @@ export interface LiteParsePluginSettings {
 	detectHeadings: boolean;
 	headingFontMultiplier: number;
 	promoteTitleSlides: boolean;
+	mergeConsecutiveHeadings: boolean;
+	singleContentMode: boolean;
 
 	// templates
 	templates: ParsingTemplate[];
@@ -96,6 +98,8 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	detectHeadings: true,
 	headingFontMultiplier: 1.3,
 	promoteTitleSlides: true,
+	mergeConsecutiveHeadings: true,
+	singleContentMode: false,
 
 	templates: [],
 };

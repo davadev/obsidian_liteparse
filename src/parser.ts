@@ -161,6 +161,54 @@ function collapseBlankLines(text: string): string {
 		.trim();
 }
 
+/**
+ * Merge consecutive Markdown headings at the same level into one. Lines
+ * separated only by blank lines are also merged. Useful for slide titles
+ * that get wrapped across two `####` lines because the original slide
+ * didn't fit them on one line.
+ */
+function mergeConsecutiveHeadingsInBody(text: string): string {
+	const lines = text.split("\n");
+	const out: string[] = [];
+	let i = 0;
+	while (i < lines.length) {
+		const m = lines[i].match(/^(#{2,6})\s+(.*\S)\s*$/);
+		if (!m) {
+			out.push(lines[i]);
+			i++;
+			continue;
+		}
+		const level = m[1];
+		const parts: string[] = [m[2].trim()];
+		let j = i + 1;
+		while (j < lines.length) {
+			if (lines[j].trim() === "") {
+				// allow a blank line between same-level headings
+				let k = j + 1;
+				if (k < lines.length) {
+					const mn = lines[k].match(/^(#{2,6})\s+(.*\S)\s*$/);
+					if (mn && mn[1] === level) {
+						parts.push(mn[2].trim());
+						j = k + 1;
+						continue;
+					}
+				}
+				break;
+			}
+			const mn = lines[j].match(/^(#{2,6})\s+(.*\S)\s*$/);
+			if (mn && mn[1] === level) {
+				parts.push(mn[2].trim());
+				j++;
+				continue;
+			}
+			break;
+		}
+		out.push(`${level} ${parts.join(" ")}`);
+		i = j;
+	}
+	return out.join("\n");
+}
+
 function detectTitleSlide(body: string): { isTitle: boolean; title: string } {
 	const lines = body
 		.split("\n")
@@ -205,10 +253,23 @@ function renderMarkdownFromPages(
 		for (const section of sections) {
 			if (section.heading) bodyParts.push(section.heading);
 			let body = section.body;
+			if (settings.mergeConsecutiveHeadings) {
+				body = mergeConsecutiveHeadingsInBody(body);
+			}
 			if (settings.collapseBlankLines) body = collapseBlankLines(body);
 			bodyParts.push(body);
 		}
-		const combinedBody = bodyParts.join("\n\n");
+		let combinedBody = bodyParts.join("\n\n");
+		if (settings.mergeConsecutiveHeadings) {
+			combinedBody = mergeConsecutiveHeadingsInBody(combinedBody);
+		}
+
+		// Single-content mode strips all per-page chrome — no Page heading,
+		// no divider, no title promotion. Everything is one flowing doc.
+		if (settings.singleContentMode) {
+			blocks.push({ text: combinedBody, isTitle: false });
+			continue;
+		}
 
 		if (settings.promoteTitleSlides) {
 			const { isTitle, title } = detectTitleSlide(combinedBody);
@@ -229,8 +290,14 @@ function renderMarkdownFromPages(
 		const block = blocks[i];
 		if (i > 0) {
 			const prev = blocks[i - 1];
-			// Title slides act as their own divider on either side.
-			if (divider && !prev.isTitle && !block.isTitle) {
+			// Single-content mode never emits dividers; title slides act as
+			// their own divider on either side.
+			if (
+				divider &&
+				!settings.singleContentMode &&
+				!prev.isTitle &&
+				!block.isTitle
+			) {
 				out.push(divider);
 			} else {
 				out.push("");
@@ -239,6 +306,7 @@ function renderMarkdownFromPages(
 		out.push(block.text);
 	}
 	let result = out.join("\n\n");
+	if (settings.mergeConsecutiveHeadings) result = mergeConsecutiveHeadingsInBody(result);
 	if (settings.collapseBlankLines) result = collapseBlankLines(result);
 	return result;
 }

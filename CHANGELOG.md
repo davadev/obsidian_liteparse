@@ -6,6 +6,29 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-21
+
+### Added
+
+- **Single-content mode.** New top-level toggle in Readability. When
+  on, the parsed output is one flowing document — no `### Page N`
+  headings, no `---` page dividers, no title-slide promotion. Useful
+  for articles, books, or any PDF where page boundaries are
+  meaningless in the output.
+- **Merge consecutive same-level headings.** Slide titles wrapped
+  across two lines (e.g. `#### Key theme 3: Socio-technical embedding
+  of` + `#### technology`) are now joined into one heading
+  (`#### Key theme 3: Socio-technical embedding of technology`).
+  Toggleable (default on). Same-level only — `### Foo` + `#### Bar`
+  stays as two headings.
+
+### Changed
+
+- Settings affected by Single-content mode (Include page headings,
+  Page divider, Promote title-only slides) are visually grayed out
+  and disabled while the mode is on, so it's clear they have no
+  effect.
+
 ## [0.4.1] - 2026-05-21
 
 ### Changed

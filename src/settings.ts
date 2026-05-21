@@ -79,6 +79,24 @@ export class LiteParseSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h3", { text: "Readability" });
 
+		const singleMode = this.plugin.settings.singleContentMode;
+
+		new Setting(containerEl)
+			.setName("Single-content mode")
+			.setDesc(
+				"Treat the entire PDF as one flowing document — no `### Page N` " +
+				"headings, no page dividers, no title-slide promotion. Useful for " +
+				"articles, books, or any PDF where page boundaries are not " +
+				"meaningful in the parsed output.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.singleContentMode).onChange(async (v) => {
+					this.plugin.settings.singleContentMode = v;
+					await this.plugin.saveSettings();
+					this.display();
+				}),
+			);
+
 		new Setting(containerEl)
 			.setName("Extraction mode")
 			.setDesc(
@@ -97,28 +115,34 @@ export class LiteParseSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		const pageHeadingSetting = new Setting(containerEl)
 			.setName("Include page headings")
 			.setDesc("Insert `### Page N` before each page's content.")
 			.addToggle((t) =>
-				t.setValue(this.plugin.settings.includePageHeadings).onChange(async (v) => {
-					this.plugin.settings.includePageHeadings = v;
-					await this.plugin.saveSettings();
-				}),
+				t
+					.setValue(this.plugin.settings.includePageHeadings)
+					.setDisabled(singleMode)
+					.onChange(async (v) => {
+						this.plugin.settings.includePageHeadings = v;
+						await this.plugin.saveSettings();
+					}),
 			);
+		if (singleMode) pageHeadingSetting.settingEl.addClass("liteparse-setting-disabled");
 
-		new Setting(containerEl)
+		const dividerSetting = new Setting(containerEl)
 			.setName("Page divider")
 			.setDesc('Inserted between pages. Leave empty for no divider. Common choices: "---", "***".')
 			.addText((t) =>
 				t
 					.setPlaceholder("---")
 					.setValue(this.plugin.settings.pageDivider)
+					.setDisabled(singleMode)
 					.onChange(async (v) => {
 						this.plugin.settings.pageDivider = v;
 						await this.plugin.saveSettings();
 					}),
 			);
+		if (singleMode) dividerSetting.settingEl.addClass("liteparse-setting-disabled");
 
 		new Setting(containerEl)
 			.setName("Collapse blank lines")
@@ -189,7 +213,7 @@ export class LiteParseSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		const titleSlideSetting = new Setting(containerEl)
 			.setName("Promote title-only slides")
 			.setDesc(
 				"When a page contains only heading-sized lines (e.g. a section " +
@@ -197,8 +221,26 @@ export class LiteParseSettingTab extends PluginSettingTab {
 				"`## Title` instead of `### Page N` + content + divider.",
 			)
 			.addToggle((t) =>
-				t.setValue(this.plugin.settings.promoteTitleSlides).onChange(async (v) => {
-					this.plugin.settings.promoteTitleSlides = v;
+				t
+					.setValue(this.plugin.settings.promoteTitleSlides)
+					.setDisabled(singleMode)
+					.onChange(async (v) => {
+						this.plugin.settings.promoteTitleSlides = v;
+						await this.plugin.saveSettings();
+					}),
+			);
+		if (singleMode) titleSlideSetting.settingEl.addClass("liteparse-setting-disabled");
+
+		new Setting(containerEl)
+			.setName("Merge consecutive same-level headings")
+			.setDesc(
+				"Combine consecutive headings of the same level (e.g. `#### A` then " +
+				"`#### B`) into one heading. Useful when a slide title is wrapped " +
+				"across multiple lines in the original PDF.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.mergeConsecutiveHeadings).onChange(async (v) => {
+					this.plugin.settings.mergeConsecutiveHeadings = v;
 					await this.plugin.saveSettings();
 				}),
 			);
