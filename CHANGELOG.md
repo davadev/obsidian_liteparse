@@ -6,6 +6,45 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-21
+
+### Changed
+
+- **Column auto-detect now uses whitespace projection.** Previous
+  approach categorized lines as "full-width" by width fraction (e.g.
+  >60% of scope width) and then searched for a clean gutter among the
+  remaining lines. That made gutter detection sensitive to an arbitrary
+  width threshold — slide titles spanning ~60% width would flip from
+  full-width to column item depending on a tunable knob.
+
+  New approach: bucket the x-axis (200 buckets across the scope), and
+  for each bucket sum the y-heights of items that horizontally overlap
+  it. Buckets whose total fill is below 25% of scope height are
+  "empty". Find the longest contiguous empty run in the middle 20–80%
+  of the scope — that's the gutter. Items entirely left of the gutter
+  go to the left column; entirely right → right column; straddling →
+  full-width (titles, subheadings).
+
+  The 25% threshold is not a tunable — it reflects a structural fact:
+  a column's text fills 60–90% of its vertical extent, while a gutter
+  only sees occasional titles crossing it (~5% per title line). The
+  midpoint cleanly separates the two regimes regardless of layout
+  specifics.
+
+  Emit order unchanged: full-width lines first (y-order) → left column
+  in full → right column in full.
+
+- **Deprecated:** `columnFullWidthThresholdPct` setting (no longer
+  read; safe to leave in stored settings).
+
+### Why
+
+A user reported a TUGraz AI-1 Organisation slide ("Grading – Online
+Tests") where the title spanned ~60% width and got pooled with the
+column items, killing gutter detection and producing line-by-line
+column interleaving. The whitespace-projection approach handles this
+case (and similar threshold-edge cases) without per-PDF tuning.
+
 ## [0.6.6] - 2026-05-21
 
 ### Fixed

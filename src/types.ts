@@ -105,6 +105,7 @@ export interface LiteParsePluginSettings {
 	// columns
 	autoDetectColumns: boolean;
 	columnGutterMinPct: number;
+	/** @deprecated unused since 0.7.0 — replaced by whitespace projection */
 	columnFullWidthThresholdPct: number;
 
 	// templates

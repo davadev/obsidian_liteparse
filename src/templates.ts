@@ -538,124 +538,126 @@ export function resolveEffectiveTemplate(
  *   - full-width lines (x-span > fullWidthPct of scope) are emitted at top
  *     to preserve titles
  */
+/**
+ * Detect a two-column layout via whitespace projection.
+ *
+ * Algorithm:
+ *  1. Bucket the x-axis (0.5% steps). For each bucket, sum the y-heights
+ *     of items that horizontally overlap it. This is the "fill" histogram.
+ *  2. Buckets whose fill is < `coverageEmptyFrac` of scope height (default
+ *     25%) are "empty". Find the longest contiguous empty run in the
+ *     middle 20–80% of the scope width. That's the column gutter.
+ *  3. Items entirely left of the gutter → left column.
+ *     Items entirely right of the gutter → right column.
+ *     Items whose horizontal extent crosses the gutter → full-width
+ *     (titles, subheadings) — emit at top.
+ *  4. Output: full-width lines (y-order), then full left column, then
+ *     full right column. Matches reading order for slides where the
+ *     title sits above two text columns.
+ *
+ * Why this beats the previous "≥60% width = full-width" rule: gutter
+ * detection is now driven by the actual whitespace the document
+ * designer left, not by an arbitrary width threshold. A title that
+ * spans 60% width adds only its own line height (~5% scope height) to
+ * the gutter buckets — still below 25% empty cutoff — so it doesn't
+ * break gutter detection.
+ */
 function splitIntoColumns(
 	items: RawTextItem[],
 	scopeXMin: number,
 	scopeXMax: number,
 	settings: LiteParsePluginSettings,
-	baseFontSize: number,
+	_baseFontSize: number,
 ): ReflowLine[] | null {
+	void _baseFontSize;
 	if (items.length < 6) return null;
 	const scopeWidth = Math.max(1, scopeXMax - scopeXMin);
-	const fullWidthFrac = Math.max(0, Math.min(1, settings.columnFullWidthThresholdPct / 100));
-	const gutterFrac = Math.max(0.005, Math.min(0.5, settings.columnGutterMinPct / 100));
-	const headingMult = Math.max(1, settings.headingFontMultiplier);
-
-	// Build candidate lines first so we can detect full-width lines.
-	const lines = buildLines(items);
-	if (lines.length < 4) return null;
-
-	const lineXSpan = (line: ReflowLine): { lo: number; hi: number } => {
-		let lo = Infinity;
-		let hi = -Infinity;
-		for (const it of line.items) {
-			const x = itemX(it);
-			const w = itemWidth(it);
-			if (x < lo) lo = x;
-			if (x + w > hi) hi = x + w;
-		}
-		return { lo, hi };
-	};
-
-	const fullWidthLines: ReflowLine[] = [];
-	const columnLines: ReflowLine[] = [];
-	for (const line of lines) {
-		const { lo, hi } = lineXSpan(line);
-		const span = hi - lo;
-		// Two paths to full-width: spans more than the configured fraction,
-		// or is heading-sized font (so slide titles even at ~60% width get
-		// promoted above the column split).
-		const headingSized =
-			baseFontSize > 0 && line.maxFontSize >= baseFontSize * headingMult;
-		if (span / scopeWidth > fullWidthFrac || headingSized) fullWidthLines.push(line);
-		else columnLines.push(line);
-	}
-	if (columnLines.length < 4) return null;
-
-	const columnItems: RawTextItem[] = [];
-	for (const line of columnLines) for (const it of line.items) columnItems.push(it);
 
 	let yLo = Infinity;
 	let yHi = -Infinity;
-	for (const it of columnItems) {
+	for (const it of items) {
 		const y = itemY(it);
 		const h = itemHeight(it);
 		if (y < yLo) yLo = y;
 		if (y + h > yHi) yHi = y + h;
 	}
-	const verticalExtent = Math.max(1, yHi - yLo);
+	if (!Number.isFinite(yLo) || !Number.isFinite(yHi)) return null;
+	const scopeHeight = Math.max(1, yHi - yLo);
 
-	let bestGutterCenter = -1;
-	let bestGutterWidth = 0;
-	for (let pct = 30; pct <= 70; pct++) {
-		const centerX = scopeXMin + (pct / 100) * scopeWidth;
-		const halfBand = (gutterFrac * scopeWidth) / 2;
-		const bandLo = centerX - halfBand;
-		const bandHi = centerX + halfBand;
-		let crosses = false;
-		for (const it of columnItems) {
-			const ix = itemX(it);
-			const iw = itemWidth(it);
-			if (ix + iw > bandLo && ix < bandHi) {
-				crosses = true;
-				break;
+	const STEPS = 200;
+	const bucketW = scopeWidth / STEPS;
+	const filled = new Array(STEPS).fill(0);
+	for (const it of items) {
+		const ix = itemX(it);
+		const iw = itemWidth(it);
+		const ih = itemHeight(it);
+		if (ih === 0) continue;
+		const bStart = Math.max(0, Math.min(STEPS - 1, Math.floor((ix - scopeXMin) / bucketW)));
+		const bEnd = Math.max(0, Math.min(STEPS - 1, Math.floor((ix + iw - scopeXMin) / bucketW)));
+		for (let b = bStart; b <= bEnd; b++) filled[b] += ih;
+	}
+
+	// A bucket is "empty" if its accumulated item height is below 25% of
+	// the scope's vertical extent. Titles crossing the gutter contribute
+	// roughly one line height (~5%) per bucket — well under 25%. A real
+	// column's text contributes 60–90%. Threshold is hardcoded as it
+	// reflects a structural property of the page, not a tunable.
+	const emptyThreshold = scopeHeight * 0.25;
+
+	const minB = Math.floor(STEPS * 0.2);
+	const maxB = Math.floor(STEPS * 0.8);
+
+	let bestStart = -1;
+	let bestLen = 0;
+	let curStart = -1;
+	for (let b = minB; b <= maxB; b++) {
+		if (filled[b] < emptyThreshold) {
+			if (curStart < 0) curStart = b;
+		} else {
+			if (curStart >= 0) {
+				const len = b - curStart;
+				if (len > bestLen) {
+					bestLen = len;
+					bestStart = curStart;
+				}
+				curStart = -1;
 			}
-		}
-		if (crosses) continue;
-		// vertical coverage: how much of the columnItems' vertical extent is
-		// flanked by items on both sides of the gutter?
-		let leftYLo = Infinity;
-		let leftYHi = -Infinity;
-		let rightYLo = Infinity;
-		let rightYHi = -Infinity;
-		for (const it of columnItems) {
-			const cx = itemX(it) + itemWidth(it) / 2;
-			const y = itemY(it);
-			const yh = y + itemHeight(it);
-			if (cx < centerX) {
-				if (y < leftYLo) leftYLo = y;
-				if (yh > leftYHi) leftYHi = yh;
-			} else {
-				if (y < rightYLo) rightYLo = y;
-				if (yh > rightYHi) rightYHi = yh;
-			}
-		}
-		if (!Number.isFinite(leftYLo) || !Number.isFinite(rightYLo)) continue;
-		const overlap =
-			Math.max(0, Math.min(leftYHi, rightYHi) - Math.max(leftYLo, rightYLo)) /
-			verticalExtent;
-		if (overlap < 0.5) continue;
-		if (gutterFrac * scopeWidth > bestGutterWidth) {
-			bestGutterWidth = gutterFrac * scopeWidth;
-			bestGutterCenter = centerX;
 		}
 	}
-	if (bestGutterCenter < 0) return null;
+	if (curStart >= 0) {
+		const len = maxB + 1 - curStart;
+		if (len > bestLen) {
+			bestLen = len;
+			bestStart = curStart;
+		}
+	}
+
+	if (bestLen === 0) return null;
+
+	const gutterWidth = bestLen * bucketW;
+	const minGutterPct = Math.max(0.5, Math.min(20, settings.columnGutterMinPct));
+	if (gutterWidth < scopeWidth * (minGutterPct / 100)) return null;
+
+	const gutterLo = scopeXMin + bestStart * bucketW;
+	const gutterHi = scopeXMin + (bestStart + bestLen) * bucketW;
 
 	const leftItems: RawTextItem[] = [];
 	const rightItems: RawTextItem[] = [];
-	for (const it of columnItems) {
-		const cx = itemX(it) + itemWidth(it) / 2;
-		if (cx < bestGutterCenter) leftItems.push(it);
-		else rightItems.push(it);
+	const fullItems: RawTextItem[] = [];
+	for (const it of items) {
+		const ix1 = itemX(it);
+		const ix2 = ix1 + itemWidth(it);
+		if (ix2 <= gutterLo + 0.5) leftItems.push(it);
+		else if (ix1 >= gutterHi - 0.5) rightItems.push(it);
+		else fullItems.push(it);
 	}
 	if (leftItems.length === 0 || rightItems.length === 0) return null;
 
+	const fullLines = buildLines(fullItems);
 	const leftLines = buildLines(leftItems);
 	const rightLines = buildLines(rightItems);
-	if (leftLines.length === 0 || rightLines.length === 0) return null;
 
-	return [...fullWidthLines, ...leftLines, ...rightLines];
+	return [...fullLines, ...leftLines, ...rightLines];
 }
 
 /**
