@@ -6,6 +6,32 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-21
+
+### Added
+
+- **Reflow extraction mode (new default).** Reconstructs clean reading
+  flow from LiteParse's positioned `textItems` instead of using the raw
+  `page.text` field, which preserved every PDF whitespace artifact. The
+  old behavior is still available as the **Raw** mode in settings.
+- **Page divider** setting. Inserts a configurable separator (default
+  `---`) between pages. Set to empty for no divider.
+- **Include page headings** toggle. `### Page N` can be turned off.
+- **Collapse blank lines** toggle. Collapses runs of 3+ blank lines to
+  one and trims trailing whitespace.
+- **Parsing templates.** User-defined per-PDF region templates with
+  percent-based, top-left-origin coordinates. Each template has a
+  `match` regex (against the vault-relative PDF path), an optional page
+  range, and `include`/`exclude` regions. Excludes filter textItems
+  (headers/footers); includes define column or section bounds with
+  optional Markdown heading per region. Templates are edited as JSON in
+  the settings tab with validation.
+
+### Changed
+
+- `parsePdf` now takes the vault-relative PDF path so it can match
+  templates.
+
 ## [0.1.2] - 2026-05-21
 
 ### Fixed

@@ -145,6 +145,10 @@ Fallbacks:
 | Include LiteParse attribution in note | `true` | Inserts a one-line credit linking to LiteParse. |
 | Include parsed timestamp | `true` | Adds a `Parsed on: …` line to each parsed block. |
 | Parsed content heading | `Parsed PDF content` | Heading used for the parsed block. |
+| Extraction mode | `reflow` | `reflow` rebuilds clean lines from positioned text items. `raw` keeps LiteParse's exact per-page text. |
+| Include page headings | `true` | Insert `### Page N` before each page. |
+| Page divider | `---` | Markdown separator inserted between pages. Empty = none. |
+| Collapse blank lines | `true` | Collapse runs of 3+ blank lines and trim trailing whitespace. |
 | Output format | `markdown` | `markdown`, `text`, or `json`. |
 | Create separate parsed note when no linking note found | `true` | Fallback to a sidecar `.parsed.md`. |
 | Fallback note location | `same-folder` | Same folder as the PDF, or a custom folder. |
@@ -155,6 +159,70 @@ Fallbacks:
 | Parse timeout | `300` (sec) | Abort parsing if it does not finish in time. |
 | Include LiteParse JSON in note | `false` | Append the raw JSON inside a `<details>` block. |
 | Debug logging | `false` | Log parser options and result shape to the dev console. |
+| Parsing templates | `[]` | Per-PDF region templates — see below. |
+
+### Parsing templates
+
+Templates let you carve a PDF page into rectangles before text is
+extracted. Use them to drop fixed headers/footers or to read multi-column
+layouts in the correct reading order.
+
+Coordinates are **percentages of the page** with the **top-left corner as
+origin** (so `x=0, y=0` is top-left, `x=100, y=100` is bottom-right).
+This is independent of the PDF's own (bottom-left) coordinate system and
+of the page's physical dimensions.
+
+Each template has:
+
+- `name` — display name only.
+- `match` — JavaScript regex tested against the PDF's vault-relative path.
+  The first matching template wins.
+- `pages` (optional) — restrict the template to specific pages, e.g.
+  `"1-5,10"`. Empty means all pages.
+- `regions` — an array of rectangles:
+  - `role: "exclude"` — drop text whose center falls inside this rectangle
+    (use for repeating headers, footers, page numbers).
+  - `role: "include"` — emit text inside this rectangle as a section.
+    Define multiple include regions to read columns in order.
+  - `x, y, w, h` — numbers 0–100 (percent of page).
+  - `headingLevel` (optional, 1–6) — prefix the region's text with a
+    Markdown heading using `name`.
+
+Example for a lecture-slides PDF with a top banner and a bottom page
+number:
+
+```json
+[
+  {
+    "name": "lecture-slides",
+    "match": "_resources/.*\\.pdf",
+    "pages": "",
+    "regions": [
+      { "name": "banner",  "role": "exclude", "x": 0, "y": 0,  "w": 100, "h": 8  },
+      { "name": "pagenum", "role": "exclude", "x": 0, "y": 95, "w": 100, "h": 5  },
+      { "name": "body",    "role": "include", "x": 0, "y": 8,  "w": 100, "h": 87 }
+    ]
+  }
+]
+```
+
+Two-column layout:
+
+```json
+[
+  {
+    "name": "two-column",
+    "match": ".*two-col.*\\.pdf",
+    "regions": [
+      { "name": "left",  "role": "include", "x": 0,  "y": 8, "w": 50, "h": 87 },
+      { "name": "right", "role": "include", "x": 50, "y": 8, "w": 50, "h": 87 }
+    ]
+  }
+]
+```
+
+Templates are edited in the plugin settings as JSON, with inline
+validation.
 
 ## Limitations
 

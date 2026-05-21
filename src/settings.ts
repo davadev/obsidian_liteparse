@@ -1,6 +1,6 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import LiteParsePlugin from "./main";
-import { OutputFormat } from "./types";
+import { ExtractionMode, OutputFormat, ParsingTemplate } from "./types";
 
 export class LiteParseSettingTab extends PluginSettingTab {
 	plugin: LiteParsePlugin;
@@ -74,6 +74,59 @@ export class LiteParseSettingTab extends PluginSettingTab {
 						this.plugin.settings.parsedContentHeading = v;
 						await this.plugin.saveSettings();
 					}),
+			);
+
+		containerEl.createEl("h3", { text: "Readability" });
+
+		new Setting(containerEl)
+			.setName("Extraction mode")
+			.setDesc(
+				"Reflow rebuilds clean lines from LiteParse's positioned textItems " +
+				"(recommended). Raw uses LiteParse's per-page text verbatim, " +
+				"preserving original spacing.",
+			)
+			.addDropdown((d) =>
+				d
+					.addOption("reflow", "Reflow (clean, recommended)")
+					.addOption("raw", "Raw (preserve PDF layout)")
+					.setValue(this.plugin.settings.extractionMode)
+					.onChange(async (v) => {
+						this.plugin.settings.extractionMode = v as ExtractionMode;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Include page headings")
+			.setDesc("Insert `### Page N` before each page's content.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.includePageHeadings).onChange(async (v) => {
+					this.plugin.settings.includePageHeadings = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Page divider")
+			.setDesc('Inserted between pages. Leave empty for no divider. Common choices: "---", "***".')
+			.addText((t) =>
+				t
+					.setPlaceholder("---")
+					.setValue(this.plugin.settings.pageDivider)
+					.onChange(async (v) => {
+						this.plugin.settings.pageDivider = v;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Collapse blank lines")
+			.setDesc("Collapse runs of 3+ blank lines down to one. Trims trailing whitespace per line.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.collapseBlankLines).onChange(async (v) => {
+					this.plugin.settings.collapseBlankLines = v;
+					await this.plugin.saveSettings();
+				}),
 			);
 
 		new Setting(containerEl)
@@ -234,5 +287,146 @@ export class LiteParseSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}),
 			);
+
+		this.renderTemplatesSection(containerEl);
+	}
+
+	private renderTemplatesSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: "Parsing templates" });
+		const p = containerEl.createEl("p");
+		p.appendText(
+			"Define page regions to exclude (e.g. headers/footers) or include " +
+			"(e.g. multi-column body). Coordinates are percentages of the page, " +
+			"with (0,0) at the top-left. The first template whose ",
+		);
+		p.createEl("code", { text: "match" });
+		p.appendText(
+			" regex matches the PDF's vault path is applied. Schema:",
+		);
+		const schema = containerEl.createEl("pre");
+		schema.createEl("code", {
+			text:
+				`[
+  {
+    "name": "lecture-slides",
+    "match": "_resources/.*lecture.*\\\\.pdf",
+    "pages": "",
+    "regions": [
+      { "name": "header", "role": "exclude", "x": 0, "y": 0,  "w": 100, "h": 8  },
+      { "name": "footer", "role": "exclude", "x": 0, "y": 92, "w": 100, "h": 8  },
+      { "name": "body",   "role": "include", "x": 0, "y": 8,  "w": 100, "h": 84 }
+    ]
+  }
+]`,
+		});
+
+		const initial = JSON.stringify(this.plugin.settings.templates, null, 2);
+		const wrap = containerEl.createDiv();
+		const ta = wrap.createEl("textarea", { cls: "liteparse-templates-editor" });
+		ta.value = initial;
+		ta.rows = 14;
+		ta.spellcheck = false;
+		ta.style.width = "100%";
+		ta.style.fontFamily = "var(--font-monospace)";
+		ta.style.fontSize = "0.85em";
+
+		const status = wrap.createDiv({ cls: "liteparse-templates-status" });
+		status.style.fontSize = "0.85em";
+		status.style.marginTop = "0.25rem";
+
+		const setStatus = (msg: string, ok: boolean) => {
+			status.setText(msg);
+			status.style.color = ok ? "var(--text-success)" : "var(--text-error)";
+		};
+
+		const btnRow = wrap.createDiv();
+		btnRow.style.display = "flex";
+		btnRow.style.gap = "0.5rem";
+		btnRow.style.marginTop = "0.5rem";
+
+		const saveBtn = btnRow.createEl("button", { text: "Save templates" });
+		const formatBtn = btnRow.createEl("button", { text: "Format" });
+		const clearBtn = btnRow.createEl("button", { text: "Clear" });
+
+		const parse = (raw: string): ParsingTemplate[] | null => {
+			const trimmed = raw.trim();
+			if (!trimmed) return [];
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(trimmed);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				setStatus(`Invalid JSON: ${msg}`, false);
+				return null;
+			}
+			if (!Array.isArray(parsed)) {
+				setStatus("Top-level value must be a JSON array of templates.", false);
+				return null;
+			}
+			// Best-effort shape validation; unknown fields ignored.
+			for (let i = 0; i < parsed.length; i++) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const t: any = parsed[i];
+				if (!t || typeof t !== "object") {
+					setStatus(`Template #${i + 1} is not an object.`, false);
+					return null;
+				}
+				if (typeof t.name !== "string" || typeof t.match !== "string") {
+					setStatus(`Template #${i + 1} requires string "name" and "match".`, false);
+					return null;
+				}
+				if (!Array.isArray(t.regions)) {
+					setStatus(`Template #${i + 1} requires a "regions" array.`, false);
+					return null;
+				}
+				try {
+					new RegExp(t.match);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					setStatus(`Template #${i + 1}: invalid match regex — ${msg}`, false);
+					return null;
+				}
+				for (let j = 0; j < t.regions.length; j++) {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const r: any = t.regions[j];
+					if (!r || typeof r !== "object") {
+						setStatus(`Template #${i + 1} region #${j + 1} is not an object.`, false);
+						return null;
+					}
+					if (r.role !== "include" && r.role !== "exclude") {
+						setStatus(`Template #${i + 1} region #${j + 1}: role must be "include" or "exclude".`, false);
+						return null;
+					}
+					for (const k of ["x", "y", "w", "h"] as const) {
+						if (typeof r[k] !== "number" || !Number.isFinite(r[k])) {
+							setStatus(`Template #${i + 1} region #${j + 1}: "${k}" must be a number.`, false);
+							return null;
+						}
+					}
+				}
+			}
+			return parsed as ParsingTemplate[];
+		};
+
+		saveBtn.onclick = async () => {
+			const parsed = parse(ta.value);
+			if (parsed === null) return;
+			this.plugin.settings.templates = parsed;
+			await this.plugin.saveSettings();
+			setStatus(`Saved ${parsed.length} template(s).`, true);
+			new Notice("LiteParse: templates saved.");
+		};
+		formatBtn.onclick = () => {
+			const parsed = parse(ta.value);
+			if (parsed === null) return;
+			ta.value = JSON.stringify(parsed, null, 2);
+			setStatus("Formatted.", true);
+		};
+		clearBtn.onclick = async () => {
+			ta.value = "[]";
+			this.plugin.settings.templates = [];
+			await this.plugin.saveSettings();
+			setStatus("Cleared.", true);
+		};
 	}
 }

@@ -2,6 +2,35 @@ export type OutputFormat = "markdown" | "text" | "json";
 
 export type FallbackFolderMode = "same-folder" | "custom-folder";
 
+export type ExtractionMode = "reflow" | "raw";
+
+/**
+ * A user-defined region on a PDF page, expressed as a percentage of page
+ * dimensions, with the top-left corner as origin (so x=0,y=0 is top-left,
+ * x=100,y=100 is bottom-right). Internally converted to PDF points
+ * (bottom-left origin) when matching textItems.
+ */
+export interface TemplateRegion {
+	name: string;
+	role: "include" | "exclude";
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	/** Optional Markdown heading level (1-6). If set, prefixes the region
+	 *  output with `## name` (or whatever level). Omit for no heading. */
+	headingLevel?: number;
+}
+
+export interface ParsingTemplate {
+	name: string;
+	/** Regex matched against the PDF's vault-relative path. Use ".*" for default. */
+	match: string;
+	/** Optional page range (e.g. "1-5,10"). Empty means all pages. */
+	pages?: string;
+	regions: TemplateRegion[];
+}
+
 export interface LiteParsePluginSettings {
 	replaceExistingParsedBlock: boolean;
 	createSeparateParsedNoteWhenNoLinkedNoteFound: boolean;
@@ -20,6 +49,15 @@ export interface LiteParsePluginSettings {
 	pageRange: string;
 	parseTimeoutSeconds: number;
 	debugLogging: boolean;
+
+	// readability
+	extractionMode: ExtractionMode;
+	includePageHeadings: boolean;
+	pageDivider: string;
+	collapseBlankLines: boolean;
+
+	// templates
+	templates: ParsingTemplate[];
 }
 
 export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
@@ -40,6 +78,13 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	pageRange: "",
 	parseTimeoutSeconds: 300,
 	debugLogging: false,
+
+	extractionMode: "reflow",
+	includePageHeadings: true,
+	pageDivider: "---",
+	collapseBlankLines: true,
+
+	templates: [],
 };
 
 export interface PdfLinkMatch {

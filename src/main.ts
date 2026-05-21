@@ -230,7 +230,7 @@ export default class LiteParsePlugin extends Plugin {
 		const notice = new Notice(`LiteParse: parsing ${pdf.name}…`, 0);
 		try {
 			const abs = getAbsolutePath(this.app.vault, pdf);
-			const result = await parsePdf(this, abs, this.settings);
+			const result = await parsePdf(this, abs, pdf.path, this.settings);
 			notice.hide();
 			if (this.settings.debugLogging) {
 				console.debug("[liteparse-pdf-parser] parse result", {

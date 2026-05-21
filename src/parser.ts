@@ -7,6 +7,13 @@ import {
 	nodeCommand,
 	PluginPaths,
 } from "./installer";
+import {
+	pageNumberOf,
+	RawPage,
+	renderPage,
+	selectTemplate,
+	templatePageFilter,
+} from "./templates";
 
 export interface NormalizedParseResult {
 	/** Markdown-ready content for insertion into a note. */
@@ -34,11 +41,6 @@ export function getAbsolutePath(vault: Vault, file: TFile): string {
 	return adapter.getFullPath(file.path);
 }
 
-interface LiteParsePage {
-	page?: number;
-	pageNum?: number;
-	text?: string;
-}
 
 function normalizePageRange(spec: string, maxPages: number | null): string | null {
 	const trimmed = spec.trim();
@@ -149,20 +151,52 @@ function runLiteParseCli(
 	});
 }
 
-function renderMarkdownFromPages(pages: LiteParsePage[]): string {
+function collapseBlankLines(text: string): string {
+	return text
+		.split("\n")
+		.map((line) => line.replace(/[ \t]+$/g, ""))
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+function renderMarkdownFromPages(
+	pages: RawPage[],
+	settings: LiteParsePluginSettings,
+	pdfVaultPath: string,
+): string {
+	const template = selectTemplate(settings.templates, pdfVaultPath);
+	const templatePages = templatePageFilter(template);
+	const divider = (settings.pageDivider ?? "").trim();
 	const blocks: string[] = [];
+	let idx = 0;
 	for (const page of pages) {
-		const num = page.page ?? page.pageNum ?? blocks.length + 1;
-		const body = (page.text ?? "").trim();
-		if (!body) continue;
-		blocks.push(`### Page ${num}\n\n${body}`);
+		idx++;
+		const num = pageNumberOf(page, idx);
+		const sections = renderPage(page, template, settings.extractionMode, templatePages);
+		if (sections.length === 0) continue;
+		const parts: string[] = [];
+		if (settings.includePageHeadings) {
+			parts.push(`### Page ${num}`);
+		}
+		for (const section of sections) {
+			if (section.heading) parts.push(section.heading);
+			let body = section.body;
+			if (settings.collapseBlankLines) body = collapseBlankLines(body);
+			parts.push(body);
+		}
+		blocks.push(parts.join("\n\n"));
 	}
-	return blocks.join("\n\n");
+	const joiner = divider ? `\n\n${divider}\n\n` : "\n\n";
+	let out = blocks.join(joiner);
+	if (settings.collapseBlankLines) out = collapseBlankLines(out);
+	return out;
 }
 
 export async function parsePdf(
 	plugin: Plugin,
 	absolutePath: string,
+	pdfVaultPath: string,
 	settings: LiteParsePluginSettings,
 ): Promise<NormalizedParseResult> {
 	const paths = await ensureLiteParse(plugin, settings.debugLogging);
@@ -192,8 +226,8 @@ export async function parsePdf(
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const r: any = parsed;
-	const pages: LiteParsePage[] = Array.isArray(r.pages) ? r.pages : [];
-	const markdown = renderMarkdownFromPages(pages);
+	const pages: RawPage[] = Array.isArray(r.pages) ? r.pages : [];
+	const markdown = renderMarkdownFromPages(pages, settings, pdfVaultPath);
 	const text: string =
 		typeof r.text === "string"
 			? r.text
