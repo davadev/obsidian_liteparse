@@ -116,6 +116,77 @@ export function nodeCommand(): string {
 	return process.platform === "win32" ? "node.exe" : "node";
 }
 
+/**
+ * Run `liteparse screenshot <pdf> --pages <n> --output <dir>` and return
+ * the path of the rendered PNG (which LiteParse names predictably as
+ * `<basename>_page_<n>.png`).
+ */
+export async function liteparseScreenshot(
+	paths: PluginPaths,
+	pdfAbsolutePath: string,
+	pageNumber: number,
+	outputDir: string,
+	debug: boolean,
+): Promise<string> {
+	if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
+	const args = [
+		paths.liteparseCli,
+		"screenshot",
+		pdfAbsolutePath,
+		"--target-pages",
+		String(pageNumber),
+		"--output-dir",
+		outputDir,
+		"--format",
+		"png",
+		"--quiet",
+	];
+	return new Promise<string>((resolve, reject) => {
+		const env = { ...process.env, PATH: augmentedPath() };
+		const child = spawn(nodeCommand(), args, {
+			cwd: paths.pluginDir,
+			env,
+			shell: process.platform === "win32",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (c: string) => {
+			stderr += c;
+			if (debug) console.debug("[liteparse-pdf-parser][screenshot]", c.trim());
+		});
+		child.on("error", reject);
+		child.on("close", (code) => {
+			if (code !== 0) {
+				reject(
+					new Error(
+						`liteparse screenshot exited with code ${code}. ` +
+						(stderr.trim().slice(-400) || "no stderr"),
+					),
+				);
+				return;
+			}
+			// LiteParse 1.5.x names screenshot files `page_<n>.png` inside
+			// the output directory.
+			const simple = join(outputDir, `page_${pageNumber}.png`);
+			if (existsSync(simple)) {
+				resolve(simple);
+				return;
+			}
+			// Fallback for older/newer CLI naming variants: scan the dir.
+			const fs = require("fs") as typeof import("fs");
+			const files = fs.readdirSync(outputDir);
+			const match = files.find(
+				(f: string) =>
+					f.toLowerCase().endsWith(".png") &&
+					f.includes(`page_${pageNumber}`),
+			);
+			if (match) resolve(join(outputDir, match));
+			else reject(new Error(`Screenshot for page ${pageNumber} not found in ${outputDir}`));
+		});
+	});
+}
+
 export interface InstallProgress {
 	(message: string): void;
 }

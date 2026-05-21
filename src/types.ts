@@ -61,6 +61,7 @@ export interface LiteParsePluginSettings {
 	detectBoldItalic: boolean;
 	detectHeadings: boolean;
 	headingFontMultiplier: number;
+	promoteTitleSlides: boolean;
 
 	// templates
 	templates: ParsingTemplate[];
@@ -94,6 +95,7 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 	detectBoldItalic: true,
 	detectHeadings: true,
 	headingFontMultiplier: 1.3,
+	promoteTitleSlides: true,
 
 	templates: [],
 };

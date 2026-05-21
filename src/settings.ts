@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import LiteParsePlugin from "./main";
-import { ExtractionMode, OutputFormat, ParsingTemplate } from "./types";
+import { ExtractionMode, OutputFormat, ParsingTemplate, TemplateRegion } from "./types";
+import { VisualRegionEditorModal } from "./visualEditor";
 
 export class LiteParseSettingTab extends PluginSettingTab {
 	plugin: LiteParsePlugin;
@@ -189,6 +190,20 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Promote title-only slides")
+			.setDesc(
+				"When a page contains only heading-sized lines (e.g. a section " +
+				"divider slide like 'AI and Knowledge'), emit it as a top-level " +
+				"`## Title` instead of `### Page N` + content + divider.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.promoteTitleSlides).onChange(async (v) => {
+					this.plugin.settings.promoteTitleSlides = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName("Output format")
 			.setDesc(
 				"Markdown is the default and recommended. Text/JSON wrap the LiteParse " +
@@ -354,138 +369,318 @@ export class LiteParseSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "Parsing templates" });
 		const p = containerEl.createEl("p");
 		p.appendText(
-			"Define page regions to exclude (e.g. headers/footers) or include " +
-			"(e.g. multi-column body). Coordinates are percentages of the page, " +
-			"with (0,0) at the top-left. The first template whose ",
+			"Define page regions to exclude (headers/footers/page numbers) or " +
+			"include (multi-column body) per PDF. Coordinates are percentages " +
+			"of the page with (0,0) at the top-left. The first template whose ",
 		);
 		p.createEl("code", { text: "match" });
-		p.appendText(
-			" regex matches the PDF's vault path is applied. Schema:",
-		);
-		const schema = containerEl.createEl("pre");
-		schema.createEl("code", {
-			text:
-				`[
-  {
-    "name": "lecture-slides",
-    "match": "_resources/.*lecture.*\\\\.pdf",
-    "pages": "",
-    "regions": [
-      { "name": "header", "role": "exclude", "x": 0, "y": 0,  "w": 100, "h": 8  },
-      { "name": "footer", "role": "exclude", "x": 0, "y": 92, "w": 100, "h": 8  },
-      { "name": "body",   "role": "include", "x": 0, "y": 8,  "w": 100, "h": 84 }
-    ]
-  }
-]`,
-		});
+		p.appendText(" regex matches the PDF's vault path wins.");
 
-		const initial = JSON.stringify(this.plugin.settings.templates, null, 2);
-		const wrap = containerEl.createDiv();
-		const ta = wrap.createEl("textarea", { cls: "liteparse-templates-editor" });
-		ta.value = initial;
-		ta.rows = 14;
-		ta.spellcheck = false;
-		ta.style.width = "100%";
-		ta.style.fontFamily = "var(--font-monospace)";
-		ta.style.fontSize = "0.85em";
+		const list = containerEl.createDiv({ cls: "liteparse-templates-list" });
+		this.renderTemplateCards(list);
 
-		const status = wrap.createDiv({ cls: "liteparse-templates-status" });
-		status.style.fontSize = "0.85em";
-		status.style.marginTop = "0.25rem";
+		const addRow = containerEl.createDiv();
+		addRow.style.display = "flex";
+		addRow.style.gap = "0.5rem";
+		addRow.style.marginTop = "0.5rem";
 
-		const setStatus = (msg: string, ok: boolean) => {
-			status.setText(msg);
-			status.style.color = ok ? "var(--text-success)" : "var(--text-error)";
+		const addBtn = addRow.createEl("button", { text: "+ Add template" });
+		addBtn.onclick = async () => {
+			this.plugin.settings.templates.push({
+				name: `template_${this.plugin.settings.templates.length + 1}`,
+				match: ".*\\.pdf$",
+				pages: "",
+				regions: [],
+			});
+			await this.plugin.saveSettings();
+			this.renderTemplateCards(list);
 		};
 
-		const btnRow = wrap.createDiv();
-		btnRow.style.display = "flex";
-		btnRow.style.gap = "0.5rem";
-		btnRow.style.marginTop = "0.5rem";
+		const advancedBtn = addRow.createEl("button", { text: "Advanced JSON editor…" });
+		advancedBtn.onclick = () => this.openAdvancedJsonEditor();
+	}
 
-		const saveBtn = btnRow.createEl("button", { text: "Save templates" });
-		const formatBtn = btnRow.createEl("button", { text: "Format" });
-		const clearBtn = btnRow.createEl("button", { text: "Clear" });
+	private renderTemplateCards(list: HTMLElement): void {
+		list.empty();
+		const templates = this.plugin.settings.templates;
+		if (templates.length === 0) {
+			const empty = list.createEl("p", {
+				text: "No templates yet. Click + Add template, or use the visual editor.",
+			});
+			empty.style.color = "var(--text-muted)";
+			return;
+		}
+		templates.forEach((tpl, idx) => {
+			const card = list.createDiv({ cls: "liteparse-settings-section" });
+			card.style.padding = "0.5rem 0.75rem";
+			card.style.marginTop = "0.75rem";
+			card.style.border = "1px solid var(--background-modifier-border)";
+			card.style.borderRadius = "6px";
 
-		const parse = (raw: string): ParsingTemplate[] | null => {
-			const trimmed = raw.trim();
-			if (!trimmed) return [];
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(trimmed);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				setStatus(`Invalid JSON: ${msg}`, false);
-				return null;
-			}
-			if (!Array.isArray(parsed)) {
-				setStatus("Top-level value must be a JSON array of templates.", false);
-				return null;
-			}
-			// Best-effort shape validation; unknown fields ignored.
-			for (let i = 0; i < parsed.length; i++) {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				const t: any = parsed[i];
-				if (!t || typeof t !== "object") {
-					setStatus(`Template #${i + 1} is not an object.`, false);
-					return null;
-				}
-				if (typeof t.name !== "string" || typeof t.match !== "string") {
-					setStatus(`Template #${i + 1} requires string "name" and "match".`, false);
-					return null;
-				}
-				if (!Array.isArray(t.regions)) {
-					setStatus(`Template #${i + 1} requires a "regions" array.`, false);
-					return null;
-				}
+			const head = card.createDiv();
+			head.style.display = "flex";
+			head.style.gap = "0.5rem";
+			head.style.alignItems = "center";
+			head.style.flexWrap = "wrap";
+
+			const nameInput = head.createEl("input", { type: "text" });
+			nameInput.value = tpl.name;
+			nameInput.placeholder = "Template name";
+			nameInput.style.flex = "1 1 12rem";
+			nameInput.onchange = async () => {
+				tpl.name = nameInput.value;
+				await this.plugin.saveSettings();
+			};
+
+			const upBtn = head.createEl("button", { text: "▲" });
+			upBtn.title = "Move up (try first)";
+			upBtn.onclick = async () => {
+				if (idx === 0) return;
+				const arr = this.plugin.settings.templates;
+				[arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+				await this.plugin.saveSettings();
+				this.renderTemplateCards(list);
+			};
+
+			const downBtn = head.createEl("button", { text: "▼" });
+			downBtn.title = "Move down";
+			downBtn.onclick = async () => {
+				const arr = this.plugin.settings.templates;
+				if (idx >= arr.length - 1) return;
+				[arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+				await this.plugin.saveSettings();
+				this.renderTemplateCards(list);
+			};
+
+			const delBtn = head.createEl("button", { text: "Delete" });
+			delBtn.onclick = async () => {
+				this.plugin.settings.templates.splice(idx, 1);
+				await this.plugin.saveSettings();
+				this.renderTemplateCards(list);
+			};
+
+			const matchRow = card.createDiv();
+			matchRow.style.marginTop = "0.4rem";
+			matchRow.style.display = "grid";
+			matchRow.style.gridTemplateColumns = "auto 1fr";
+			matchRow.style.gap = "0.5rem";
+			matchRow.style.alignItems = "center";
+
+			matchRow.createSpan({ text: "Match (regex):" });
+			const matchInput = matchRow.createEl("input", { type: "text" });
+			matchInput.value = tpl.match;
+			matchInput.style.fontFamily = "var(--font-monospace)";
+			matchInput.style.fontSize = "0.9em";
+			matchInput.onchange = async () => {
 				try {
-					new RegExp(t.match);
+					new RegExp(matchInput.value);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					setStatus(`Template #${i + 1}: invalid match regex — ${msg}`, false);
-					return null;
+					new Notice(`Invalid regex: ${msg}`);
+					matchInput.value = tpl.match;
+					return;
 				}
-				for (let j = 0; j < t.regions.length; j++) {
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					const r: any = t.regions[j];
-					if (!r || typeof r !== "object") {
-						setStatus(`Template #${i + 1} region #${j + 1} is not an object.`, false);
-						return null;
+				tpl.match = matchInput.value;
+				await this.plugin.saveSettings();
+			};
+
+			matchRow.createSpan({ text: "Pages:" });
+			const pagesInput = matchRow.createEl("input", { type: "text" });
+			pagesInput.value = tpl.pages ?? "";
+			pagesInput.placeholder = "empty = all (e.g. 1-5,10)";
+			pagesInput.onchange = async () => {
+				tpl.pages = pagesInput.value;
+				await this.plugin.saveSettings();
+			};
+
+			this.renderRegionRows(card, tpl);
+		});
+	}
+
+	private renderRegionRows(card: HTMLElement, tpl: ParsingTemplate): void {
+		const tbl = card.createEl("table");
+		tbl.style.width = "100%";
+		tbl.style.marginTop = "0.5rem";
+		tbl.style.fontSize = "0.85em";
+		const head = tbl.createEl("thead").createEl("tr");
+		for (const h of ["Region", "Role", "x", "y", "w", "h", "H#", ""]) {
+			const th = head.createEl("th", { text: h });
+			th.style.textAlign = "left";
+		}
+		const tbody = tbl.createEl("tbody");
+		const drawRow = (region: TemplateRegion, idx: number) => {
+			const tr = tbody.createEl("tr");
+			const mkInput = (
+				type: "text" | "number",
+				value: string,
+				width: string,
+				onChange: (v: string) => void,
+			) => {
+				const td = tr.createEl("td");
+				const input = td.createEl("input", { type });
+				input.value = value;
+				input.style.width = width;
+				if (type === "number") input.step = "0.1";
+				input.onchange = () => onChange(input.value);
+				return input;
+			};
+
+			mkInput("text", region.name, "9rem", async (v) => {
+				region.name = v;
+				await this.plugin.saveSettings();
+			});
+
+			const roleTd = tr.createEl("td");
+			const sel = roleTd.createEl("select");
+			sel.createEl("option", { text: "exclude", value: "exclude" });
+			sel.createEl("option", { text: "include", value: "include" });
+			sel.value = region.role;
+			sel.onchange = async () => {
+				region.role = sel.value as "include" | "exclude";
+				await this.plugin.saveSettings();
+			};
+
+			for (const k of ["x", "y", "w", "h"] as const) {
+				mkInput("number", String(region[k]), "4.5rem", async (v) => {
+					const n = Number(v);
+					if (Number.isFinite(n)) {
+						region[k] = n;
+						await this.plugin.saveSettings();
 					}
-					if (r.role !== "include" && r.role !== "exclude") {
-						setStatus(`Template #${i + 1} region #${j + 1}: role must be "include" or "exclude".`, false);
-						return null;
-					}
-					for (const k of ["x", "y", "w", "h"] as const) {
-						if (typeof r[k] !== "number" || !Number.isFinite(r[k])) {
-							setStatus(`Template #${i + 1} region #${j + 1}: "${k}" must be a number.`, false);
-							return null;
-						}
-					}
-				}
+				});
 			}
-			return parsed as ParsingTemplate[];
+
+			const hlTd = tr.createEl("td");
+			const hlInput = hlTd.createEl("input", { type: "number" });
+			hlInput.min = "1";
+			hlInput.max = "6";
+			hlInput.style.width = "3.5rem";
+			hlInput.value = region.headingLevel ? String(region.headingLevel) : "";
+			hlInput.placeholder = "—";
+			hlInput.onchange = async () => {
+				const n = Number(hlInput.value);
+				if (Number.isFinite(n) && n >= 1 && n <= 6) {
+					region.headingLevel = n;
+				} else {
+					delete region.headingLevel;
+				}
+				await this.plugin.saveSettings();
+			};
+
+			const delTd = tr.createEl("td");
+			const del = delTd.createEl("button", { text: "×" });
+			del.onclick = async () => {
+				tpl.regions.splice(idx, 1);
+				await this.plugin.saveSettings();
+				this.display();
+			};
+		};
+		tpl.regions.forEach(drawRow);
+
+		const btnRow = card.createDiv();
+		btnRow.style.display = "flex";
+		btnRow.style.gap = "0.5rem";
+		btnRow.style.marginTop = "0.4rem";
+
+		const addRegionBtn = btnRow.createEl("button", { text: "+ Region" });
+		addRegionBtn.onclick = async () => {
+			tpl.regions.push({
+				name: `region_${tpl.regions.length + 1}`,
+				role: "exclude",
+				x: 0,
+				y: 0,
+				w: 100,
+				h: 10,
+			});
+			await this.plugin.saveSettings();
+			this.display();
 		};
 
-		saveBtn.onclick = async () => {
-			const parsed = parse(ta.value);
-			if (parsed === null) return;
-			this.plugin.settings.templates = parsed;
-			await this.plugin.saveSettings();
-			setStatus(`Saved ${parsed.length} template(s).`, true);
-			new Notice("LiteParse: templates saved.");
+		const visualBtn = btnRow.createEl("button", { text: "Edit visually…" });
+		visualBtn.onclick = () => {
+			const initialPdfPath = this.guessInitialPdfPath(tpl);
+			new VisualRegionEditorModal(
+				this.app,
+				this.plugin,
+				tpl.regions,
+				async (regions) => {
+					tpl.regions = regions;
+					await this.plugin.saveSettings();
+					new Notice(`LiteParse: saved ${regions.length} region(s) for ${tpl.name}.`);
+					this.display();
+				},
+				initialPdfPath,
+			).open();
 		};
-		formatBtn.onclick = () => {
-			const parsed = parse(ta.value);
-			if (parsed === null) return;
-			ta.value = JSON.stringify(parsed, null, 2);
-			setStatus("Formatted.", true);
-		};
-		clearBtn.onclick = async () => {
-			ta.value = "[]";
-			this.plugin.settings.templates = [];
-			await this.plugin.saveSettings();
-			setStatus("Cleared.", true);
-		};
+	}
+
+	/**
+	 * Best-effort: pick a vault PDF whose path matches the template's regex,
+	 * so the visual editor opens with something useful already loaded.
+	 */
+	private guessInitialPdfPath(tpl: ParsingTemplate): string | undefined {
+		let re: RegExp;
+		try {
+			re = new RegExp(tpl.match);
+		} catch {
+			return undefined;
+		}
+		const pdfs = this.app.vault
+			.getFiles()
+			.filter((f) => f.extension.toLowerCase() === "pdf");
+		const hit = pdfs.find((f) => re.test(f.path));
+		return hit?.path;
+	}
+
+	private openAdvancedJsonEditor(): void {
+		const modal = new (class extends (require("obsidian").Modal as typeof import("obsidian").Modal) {
+			content: string;
+			plugin: LiteParsePlugin;
+			tab: LiteParseSettingTab;
+			constructor(app: App, plugin: LiteParsePlugin, tab: LiteParseSettingTab) {
+				super(app);
+				this.plugin = plugin;
+				this.tab = tab;
+				this.content = JSON.stringify(plugin.settings.templates, null, 2);
+			}
+			onOpen(): void {
+				const { contentEl } = this;
+				contentEl.empty();
+				contentEl.createEl("h2", { text: "Templates JSON" });
+				const ta = contentEl.createEl("textarea");
+				ta.value = this.content;
+				ta.rows = 20;
+				ta.style.width = "100%";
+				ta.style.fontFamily = "var(--font-monospace)";
+				ta.style.fontSize = "0.85em";
+				const status = contentEl.createDiv();
+				status.style.fontSize = "0.85em";
+				status.style.marginTop = "0.25rem";
+				const row = contentEl.createDiv();
+				row.style.display = "flex";
+				row.style.gap = "0.5rem";
+				row.style.marginTop = "0.5rem";
+				const save = row.createEl("button", { text: "Save" });
+				save.classList.add("mod-cta");
+				const cancel = row.createEl("button", { text: "Cancel" });
+				save.onclick = async () => {
+					try {
+						const parsed = JSON.parse(ta.value);
+						if (!Array.isArray(parsed)) throw new Error("Top-level must be an array.");
+						this.plugin.settings.templates = parsed as ParsingTemplate[];
+						await this.plugin.saveSettings();
+						new Notice("LiteParse: templates saved.");
+						this.close();
+						this.tab.display();
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						status.setText(`Invalid JSON: ${msg}`);
+						status.style.color = "var(--text-error)";
+					}
+				};
+				cancel.onclick = () => this.close();
+			}
+		})(this.app, this.plugin, this);
+		modal.open();
 	}
 }

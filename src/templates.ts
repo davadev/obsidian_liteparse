@@ -206,8 +206,18 @@ function escapeMarkdown(line: string): string {
 	return line.replace(/^#+\s/, (m) => `\\${m}`);
 }
 
+/**
+ * Treat any of these as a bullet glyph at the start of a line:
+ * - Known visible bullets (•, ●, ▪, ◦, etc.)
+ * - The Unicode replacement character ()
+ * - Anything in the Private Use Area (U+E000–U+F8FF) — fonts like
+ *   Wingdings, Symbol, FontAwesome and PowerPoint's own bullet font
+ *   live here; PDFs that show a list icon usually emit a PUA codepoint
+ *   instead of a real bullet.
+ * - A leading `*` followed by a space (some PDFs use plain asterisks).
+ */
 const BULLET_REGEX =
-	/^([\u{FFFD}•●◉▪▫◦‣⁃▶►◆◇∙■□❖❑❒♦♢★☆⚫⚪⬤◼◻]|\*)\s+/u;
+	/^[ \t]*([\u{E000}-\u{F8FF}\u{FFFD}•●◉▪▫◦‣⁃▶►◆◇∙■□❖❑❒♦♢★☆⚫⚪⬤◼◻▸▹·]|\*(?=\s))\s+/u;
 
 function applyBulletReplacement(text: string, replacement: string): string {
 	if (!replacement) return text;

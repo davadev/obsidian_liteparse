@@ -6,6 +6,41 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-21
+
+### Added
+
+- **Visual region editor.** A modal renders any PDF page via
+  LiteParse's screenshot subcommand and lets you drag rectangles
+  directly on the image to define exclude/include regions. Each region
+  gets a name, role, percent-precise coordinates, and an optional
+  Markdown heading level. Reachable from each template card via
+  "Edit visually…", and pre-loads the first vault PDF whose path
+  matches the template's regex.
+- **Per-template card editor.** Templates are now edited as
+  structured cards in the settings tab — name, regex, page range,
+  per-region rows (name / role / x / y / w / h / headingLevel), plus
+  reorder / delete buttons. An "Advanced JSON editor…" modal stays
+  available for bulk paste/export.
+- **Title-slide promotion.** Pages that contain only heading-sized
+  lines (e.g. lecture section dividers like "AI and Knowledge") emit
+  as `## Title` instead of `### Page N` + body + divider. Page
+  dividers around title slides are also suppressed so the title acts
+  as its own divider. Toggleable.
+- **Wider bullet detection.** The bullet regex now also catches the
+  entire Private Use Area (U+E000–U+F8FF), which is where PowerPoint
+  / Word / lecture-slide fonts park their list-icon glyphs. Lines like
+  "` Understand …`" with a font-private list icon are now rewritten
+  as proper Markdown list items.
+- Screenshot helper in `installer.ts` invoking
+  `liteparse screenshot <pdf> --target-pages N --output-dir DIR
+  --format png --quiet`, used by the visual editor.
+
+### Changed
+
+- Templates JSON textarea is gone from the default settings view — it
+  lives behind the new "Advanced JSON editor…" button.
+
 ## [0.3.0] - 2026-05-21
 
 ### Fixed

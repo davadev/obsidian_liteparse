@@ -161,6 +161,21 @@ function collapseBlankLines(text: string): string {
 		.trim();
 }
 
+function detectTitleSlide(body: string): { isTitle: boolean; title: string } {
+	const lines = body
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+	if (lines.length === 0 || lines.length > 4) {
+		return { isTitle: false, title: "" };
+	}
+	if (!lines.every((l) => /^#{2,6}\s/.test(l))) {
+		return { isTitle: false, title: "" };
+	}
+	const title = lines.map((l) => l.replace(/^#+\s+/, "")).join(" ");
+	return { isTitle: title.length > 0, title };
+}
+
 function renderMarkdownFromPages(
 	pages: RawPage[],
 	settings: LiteParsePluginSettings,
@@ -174,29 +189,58 @@ function renderMarkdownFromPages(
 	const templatePages = templatePageFilter(template);
 	const baseFontSize = computeBaseFontSize(pages);
 	const divider = (settings.pageDivider ?? "").trim();
-	const blocks: string[] = [];
+	interface Block {
+		text: string;
+		isTitle: boolean;
+	}
+	const blocks: Block[] = [];
 	let idx = 0;
 	for (const page of pages) {
 		idx++;
 		const num = pageNumberOf(page, idx);
 		const sections = renderPage(page, template, settings, baseFontSize, templatePages);
 		if (sections.length === 0) continue;
-		const parts: string[] = [];
-		if (settings.includePageHeadings) {
-			parts.push(`### Page ${num}`);
-		}
+
+		const bodyParts: string[] = [];
 		for (const section of sections) {
-			if (section.heading) parts.push(section.heading);
+			if (section.heading) bodyParts.push(section.heading);
 			let body = section.body;
 			if (settings.collapseBlankLines) body = collapseBlankLines(body);
-			parts.push(body);
+			bodyParts.push(body);
 		}
-		blocks.push(parts.join("\n\n"));
+		const combinedBody = bodyParts.join("\n\n");
+
+		if (settings.promoteTitleSlides) {
+			const { isTitle, title } = detectTitleSlide(combinedBody);
+			if (isTitle) {
+				blocks.push({ text: `## ${title}`, isTitle: true });
+				continue;
+			}
+		}
+
+		const parts: string[] = [];
+		if (settings.includePageHeadings) parts.push(`### Page ${num}`);
+		parts.push(combinedBody);
+		blocks.push({ text: parts.join("\n\n"), isTitle: false });
 	}
-	const joiner = divider ? `\n\n${divider}\n\n` : "\n\n";
-	let out = blocks.join(joiner);
-	if (settings.collapseBlankLines) out = collapseBlankLines(out);
-	return out;
+
+	const out: string[] = [];
+	for (let i = 0; i < blocks.length; i++) {
+		const block = blocks[i];
+		if (i > 0) {
+			const prev = blocks[i - 1];
+			// Title slides act as their own divider on either side.
+			if (divider && !prev.isTitle && !block.isTitle) {
+				out.push(divider);
+			} else {
+				out.push("");
+			}
+		}
+		out.push(block.text);
+	}
+	let result = out.join("\n\n");
+	if (settings.collapseBlankLines) result = collapseBlankLines(result);
+	return result;
 }
 
 export async function parsePdf(
