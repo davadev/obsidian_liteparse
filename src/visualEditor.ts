@@ -66,9 +66,16 @@ export interface VisualEditorResult {
 	probes: TemplateProbe[];
 }
 
+export interface VisualEditorCallbacks {
+	/** Called on every change. Persists state without UI feedback. */
+	onChange: (result: VisualEditorResult) => void;
+	/** Called once when the modal closes. Lets the caller refresh its UI. */
+	onClose?: (result: VisualEditorResult) => void;
+}
+
 export class VisualRegionEditorModal extends Modal {
 	private readonly plugin: LiteParsePlugin;
-	private readonly onSave: (result: VisualEditorResult) => void;
+	private readonly callbacks: VisualEditorCallbacks;
 	private readonly initialRegions: TemplateRegion[];
 	private readonly initialProbes: TemplateProbe[];
 	private readonly siblingTemplateNames: string[];
@@ -98,13 +105,13 @@ export class VisualRegionEditorModal extends Modal {
 		initialRegions: TemplateRegion[],
 		initialProbes: TemplateProbe[],
 		siblingTemplateNames: string[],
-		onSave: (result: VisualEditorResult) => void,
+		callbacks: VisualEditorCallbacks,
 		initialPdfPath?: string,
 		initialMode: DrawingMode = "regions",
 	) {
 		super(app);
 		this.plugin = plugin;
-		this.onSave = onSave;
+		this.callbacks = callbacks;
 		this.initialRegions = initialRegions;
 		this.initialProbes = initialProbes;
 		this.siblingTemplateNames = siblingTemplateNames;
@@ -231,10 +238,17 @@ export class VisualRegionEditorModal extends Modal {
 		btnRow.style.display = "flex";
 		btnRow.style.gap = "0.5rem";
 		btnRow.style.marginTop = "0.75rem";
+		btnRow.style.alignItems = "center";
 
-		const saveBtn = btnRow.createEl("button", { text: "Save regions" });
-		saveBtn.classList.add("mod-cta");
-		const cancelBtn = btnRow.createEl("button", { text: "Cancel" });
+		const hint = btnRow.createSpan({
+			text: "Changes save automatically.",
+		});
+		hint.style.fontSize = "0.8em";
+		hint.style.color = "var(--text-muted)";
+		hint.style.marginRight = "auto";
+
+		const doneBtn = btnRow.createEl("button", { text: "Done" });
+		doneBtn.classList.add("mod-cta");
 
 		pickBtn.onclick = () => {
 			const pdfs = this.app.vault.getFiles().filter((f) => f.extension.toLowerCase() === "pdf");
@@ -259,39 +273,7 @@ export class VisualRegionEditorModal extends Modal {
 			void this.loadPage();
 		};
 
-		saveBtn.onclick = () => {
-			const regions: TemplateRegion[] = this.regions.map((r) => ({
-				name: r.name,
-				role: r.role,
-				x: Math.round(r.xPct * 100) / 100,
-				y: Math.round(r.yPct * 100) / 100,
-				w: Math.round(r.wPct * 100) / 100,
-				h: Math.round(r.hPct * 100) / 100,
-			}));
-			const probes: TemplateProbe[] = this.probes.map((p) => {
-				const onMatch: ProbeAction =
-					p.actionKind === "skip"
-						? { kind: "skip" }
-						: p.actionKind === "switch" && p.targetTemplate
-							? { kind: "switch", templateName: p.targetTemplate }
-							: { kind: "use-current" };
-				const out: TemplateProbe = {
-					name: p.name,
-					x: Math.round(p.xPct * 100) / 100,
-					y: Math.round(p.yPct * 100) / 100,
-					w: Math.round(p.wPct * 100) / 100,
-					h: Math.round(p.hPct * 100) / 100,
-					pattern: p.pattern,
-					onMatch,
-				};
-				if (p.flags) out.flags = p.flags;
-				return out;
-			});
-			this.onSave({ regions, probes });
-			this.close();
-		};
-
-		cancelBtn.onclick = () => this.close();
+		doneBtn.onclick = () => this.close();
 
 		if (this.initialPdfPath) {
 			const f = this.app.vault.getAbstractFileByPath(this.initialPdfPath);
@@ -312,7 +294,47 @@ export class VisualRegionEditorModal extends Modal {
 			}
 			this.tmpDir = null;
 		}
+		try {
+			this.callbacks.onClose?.(this.serialize());
+		} catch (err) {
+			console.warn("[liteparse-pdf-parser] onClose callback failed", err);
+		}
 		this.contentEl.empty();
+	}
+
+	private serialize(): VisualEditorResult {
+		const regions: TemplateRegion[] = this.regions.map((r) => ({
+			name: r.name,
+			role: r.role,
+			x: Math.round(r.xPct * 100) / 100,
+			y: Math.round(r.yPct * 100) / 100,
+			w: Math.round(r.wPct * 100) / 100,
+			h: Math.round(r.hPct * 100) / 100,
+		}));
+		const probes: TemplateProbe[] = this.probes.map((p) => {
+			const onMatch: ProbeAction =
+				p.actionKind === "skip"
+					? { kind: "skip" }
+					: p.actionKind === "switch" && p.targetTemplate
+						? { kind: "switch", templateName: p.targetTemplate }
+						: { kind: "use-current" };
+			const out: TemplateProbe = {
+				name: p.name,
+				x: Math.round(p.xPct * 100) / 100,
+				y: Math.round(p.yPct * 100) / 100,
+				w: Math.round(p.wPct * 100) / 100,
+				h: Math.round(p.hPct * 100) / 100,
+				pattern: p.pattern,
+				onMatch,
+			};
+			if (p.flags) out.flags = p.flags;
+			return out;
+		});
+		return { regions, probes };
+	}
+
+	private commit(): void {
+		this.callbacks.onChange(this.serialize());
 	}
 
 	private setStatus(msg: string, isError = false): void {
@@ -489,6 +511,7 @@ export class VisualRegionEditorModal extends Modal {
 				this.probes.push(probe);
 				this.renderProbeList();
 				this.renderRegionOverlays();
+				this.commit();
 				return;
 			}
 			const region: DraftRegion = {
@@ -506,6 +529,7 @@ export class VisualRegionEditorModal extends Modal {
 			this.regions.push(region);
 			this.renderRegionList();
 			this.renderRegionOverlays();
+			this.commit();
 		});
 	}
 
@@ -745,6 +769,7 @@ export class VisualRegionEditorModal extends Modal {
 			nameInput.onchange = () => {
 				probe.name = nameInput.value;
 				this.renderRegionOverlays();
+				this.commit();
 			};
 
 			for (const k of ["xPct", "yPct", "wPct", "hPct"] as const) {
@@ -759,6 +784,7 @@ export class VisualRegionEditorModal extends Modal {
 						(probe as unknown as Record<string, number>)[k] = n;
 						this.renderRegionOverlays();
 						refreshPreview(probe.id);
+						this.commit();
 					}
 				};
 			}
@@ -773,6 +799,7 @@ export class VisualRegionEditorModal extends Modal {
 			const onPatternInput = () => {
 				probe.pattern = patternInput.value;
 				refreshPreview(probe.id);
+				this.commit();
 			};
 			patternInput.oninput = onPatternInput;
 			patternInput.onchange = onPatternInput;
@@ -786,6 +813,7 @@ export class VisualRegionEditorModal extends Modal {
 			const onFlagsInput = () => {
 				probe.flags = flagsInput.value;
 				refreshPreview(probe.id);
+				this.commit();
 			};
 			flagsInput.oninput = onFlagsInput;
 			flagsInput.onchange = onFlagsInput;
@@ -818,6 +846,7 @@ export class VisualRegionEditorModal extends Modal {
 				}
 				sel.onchange = () => {
 					probe.targetTemplate = sel.value;
+					this.commit();
 				};
 			};
 			renderTarget();
@@ -825,6 +854,7 @@ export class VisualRegionEditorModal extends Modal {
 			actionSel.onchange = () => {
 				probe.actionKind = actionSel.value as DraftProbe["actionKind"];
 				renderTarget();
+				this.commit();
 			};
 
 			const delTd = tr.createEl("td");
@@ -833,6 +863,7 @@ export class VisualRegionEditorModal extends Modal {
 				this.probes = this.probes.filter((p) => p.id !== probe.id);
 				this.renderProbeList();
 				this.renderRegionOverlays();
+				this.commit();
 			};
 
 			const previewTr = tbody.createEl("tr");
@@ -917,6 +948,7 @@ export class VisualRegionEditorModal extends Modal {
 			nameInput.onchange = () => {
 				region.name = nameInput.value;
 				this.renderRegionOverlays();
+				this.commit();
 			};
 
 			const roleTd = tr.createEl("td");
@@ -927,6 +959,7 @@ export class VisualRegionEditorModal extends Modal {
 			roleSel.onchange = () => {
 				region.role = roleSel.value as "include" | "exclude";
 				this.renderRegionOverlays();
+				this.commit();
 			};
 
 			for (const k of ["xPct", "yPct", "wPct", "hPct"] as const) {
@@ -940,6 +973,7 @@ export class VisualRegionEditorModal extends Modal {
 					if (Number.isFinite(n)) {
 						(region as unknown as Record<string, number>)[k] = n;
 						this.renderRegionOverlays();
+						this.commit();
 					}
 				};
 			}
@@ -949,6 +983,7 @@ export class VisualRegionEditorModal extends Modal {
 			delBtn.onclick = () => {
 				this.regions = this.regions.filter((r) => r.id !== region.id);
 				this.renderRegionList();
+				this.commit();
 			};
 		});
 		this.renderRegionOverlays();

@@ -891,14 +891,18 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			tpl.regions,
 			tpl.probes ?? [],
 			siblings,
-			async ({ regions, probes }) => {
-				tpl.regions = regions;
-				tpl.probes = probes.length ? probes : undefined;
-				await this.plugin.saveSettings();
-				new Notice(
-					`LiteParse: saved ${regions.length} region(s) and ${probes.length} probe(s) for ${tpl.name}.`,
-				);
-				this.display();
+			{
+				onChange: ({ regions, probes }) => {
+					tpl.regions = regions;
+					tpl.probes = probes.length ? probes : undefined;
+					void this.plugin.saveSettings();
+				},
+				onClose: ({ regions, probes }) => {
+					new Notice(
+						`LiteParse: saved ${regions.length} region(s) and ${probes.length} probe(s) for ${tpl.name}.`,
+					);
+					this.display();
+				},
 			},
 			initialPdfPath,
 			initialMode,

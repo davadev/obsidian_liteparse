@@ -6,6 +6,27 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-05-21
+
+### Fixed
+
+- **Visual editor changes now auto-save.** The "Save regions" button
+  was a footgun: a user could edit a probe pattern in the visual
+  editor, see the live ✓ matches indicator validate against the draft,
+  and then close (or just parse) without clicking Save. The settings
+  still held the original (often broken) pattern, so parsing used the
+  old value while the editor preview reported "matches". Now every
+  mutation in the visual editor — drawing a rect, renaming, changing
+  coords/role/action/target, editing pattern/flags, deleting — commits
+  immediately through `onChange`. The bottom "Save regions" / "Cancel"
+  pair is replaced by a single "Done" button (plus an inline hint
+  `Changes save automatically.`); closing the modal additionally fires
+  an `onClose` callback that refreshes the settings card UI and shows
+  the saved-N notice.
+- `VisualRegionEditorModal` constructor signature changed: takes a
+  `VisualEditorCallbacks` object (`onChange` + optional `onClose`)
+  instead of a single `onSave`. Settings tab updated accordingly.
+
 ## [0.6.3] - 2026-05-21
 
 ### Added
