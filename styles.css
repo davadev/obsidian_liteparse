@@ -1,0 +1,22 @@
+/* LiteParse PDF Parser — styles */
+
+.liteparse-suggest-item {
+	display: flex;
+	flex-direction: column;
+	padding: 0.25rem 0.5rem;
+}
+
+.liteparse-suggest-item-title {
+	font-weight: 600;
+}
+
+.liteparse-suggest-item-sub {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.liteparse-settings-section {
+	margin-top: 1.5rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--background-modifier-border);
+}

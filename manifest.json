@@ -1,0 +1,10 @@
+{
+  "id": "liteparse-pdf-parser",
+  "name": "LiteParse PDF Parser",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Parse PDFs in Obsidian using LiteParse and insert the result below the PDF link.",
+  "author": "davadev",
+  "authorUrl": "https://github.com/davadev",
+  "isDesktopOnly": true
+}

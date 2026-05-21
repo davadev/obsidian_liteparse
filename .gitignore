@@ -1,0 +1,28 @@
+# intellij
+.idea
+
+# vscode
+.vscode
+
+# claude code
+.claude
+
+# npm
+node_modules
+package-lock.json.bak
+
+# build
+main.js
+*.map
+
+# obsidian
+data.json
+
+# os
+.DS_Store
+Thumbs.db
+
+# misc
+*.log
+.env
+.env.local
