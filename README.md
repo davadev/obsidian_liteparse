@@ -55,12 +55,11 @@ Parsed on: 2026-05-21 09:42
 ## Requirements
 
 - Obsidian desktop (Windows / macOS / Linux).
-- LiteParse 1.5+ installed in the plugin folder (the plugin loads it
-  dynamically because it ships native modules and uses top-level await
-  that can't be bundled into a CommonJS Obsidian plugin). Install steps
-  are in [Manual install](#manual-install).
-- Node + npm are only required for the one-time install step described
-  there.
+- **Node.js + npm on your PATH.** The plugin invokes `npm install` once,
+  on first use, to fetch LiteParse into the plugin folder. LiteParse
+  cannot be bundled (ESM with top-level await + native modules), so it
+  is installed at runtime instead. If you don't have Node, install it
+  from <https://nodejs.org/> (LTS is fine).
 
 > **Desktop only.** This plugin is desktop-only because it uses the native
 > Node version of LiteParse. Obsidian mobile is not supported.
@@ -91,22 +90,18 @@ Coming after approval. See
 2. Create a folder
    `<vault>/.obsidian/plugins/liteparse-pdf-parser/` and drop the three
    files into it.
-3. **Install LiteParse into that folder.** LiteParse ships native modules
-   (`@hyzyla/pdfium`, `sharp`, `tesseract.js`) and uses top-level await,
-   so this plugin loads it dynamically at runtime instead of bundling it.
-   In a terminal:
+3. Enable the plugin in **Settings → Community plugins**.
+4. The first time you parse a PDF, the plugin runs `npm install
+   @llamaindex/liteparse` into the plugin folder automatically. You'll
+   see a notice while this happens. Subsequent parses are instant.
 
-   ```bash
-   cd <vault>/.obsidian/plugins/liteparse-pdf-parser
-   npm init -y                                # only if package.json is missing
-   npm install --omit=dev @llamaindex/liteparse@latest
-   ```
+If the auto-install fails (e.g. `npm` is not on PATH), open a terminal
+and run it manually:
 
-   This installs LiteParse and the right native binaries for your OS.
-4. Reload Obsidian and enable the plugin in **Settings → Community plugins**.
-
-> Note: This manual step is required today. We are tracking an effort to
-> simplify it — see [issues](https://github.com/davadev/obsidian_liteparse/issues).
+```bash
+cd <vault>/.obsidian/plugins/liteparse-pdf-parser
+npm install --omit=dev @llamaindex/liteparse@latest
+```
 
 ## Usage
 

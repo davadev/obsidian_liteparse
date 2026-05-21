@@ -19,7 +19,6 @@ import {
 	NormalizedParseResult,
 	getAbsolutePath,
 	parsePdf,
-	probeLiteParseAvailable,
 } from "./parser";
 import {
 	applyParsedBlockToNote,
@@ -104,8 +103,6 @@ export default class LiteParsePlugin extends Plugin {
 			},
 		});
 
-		// Best-effort load check — does not block startup.
-		void probeLiteParseAvailable();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -233,7 +230,7 @@ export default class LiteParsePlugin extends Plugin {
 		const notice = new Notice(`LiteParse: parsing ${pdf.name}…`, 0);
 		try {
 			const abs = getAbsolutePath(this.app.vault, pdf);
-			const result = await parsePdf(abs, this.settings);
+			const result = await parsePdf(this, abs, this.settings);
 			notice.hide();
 			if (this.settings.debugLogging) {
 				console.debug("[liteparse-pdf-parser] parse result", {

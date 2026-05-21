@@ -6,6 +6,22 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-21
+
+### Added
+
+- Auto-install of `@llamaindex/liteparse` into the plugin folder on first
+  use. No more manual `npm install` step for users with Node on PATH.
+
+### Fixed
+
+- ESM import path for LiteParse. The 0.1.0 build emitted a `require()`
+  for `@llamaindex/liteparse`, which fails because LiteParse is ESM with
+  top-level await. The plugin now loads it via a real `import(fileURL)`
+  through Node's native ESM loader.
+- Release workflow is now idempotent — re-running for an existing tag
+  uploads/clobbers artifacts instead of failing.
+
 ## [0.1.0] - 2026-05-21
 
 ### Added

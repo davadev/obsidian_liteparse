@@ -1,5 +1,6 @@
-import { FileSystemAdapter, Notice, TFile, Vault } from "obsidian";
+import { FileSystemAdapter, Plugin, TFile, Vault } from "obsidian";
 import { LiteParsePluginSettings } from "./types";
+import { ensureLiteParse } from "./installer";
 
 export interface NormalizedParseResult {
 	/** Markdown-ready content for insertion into a note. */
@@ -62,21 +63,12 @@ function parsePageRange(spec: string, maxPages: number | null): number[] | undef
 }
 
 /**
- * Lazy-load @llamaindex/liteparse. It pulls in native modules (sharp,
- * @hyzyla/pdfium, tesseract.js); deferring keeps plugin startup cheap.
+ * Lazy-load @llamaindex/liteparse, auto-installing it into the plugin
+ * folder on first use. LiteParse is ESM + top-level await + native deps,
+ * so it can't be bundled — see installer.ts.
  */
-async function loadLiteParse(): Promise<unknown> {
-	try {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const mod: any = await import("@llamaindex/liteparse");
-		return mod.LiteParse ?? mod.default?.LiteParse ?? mod.default ?? mod;
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(
-			"Could not load @llamaindex/liteparse. Install it inside the plugin " +
-			"folder (see README → Manual install). Underlying error: " + msg,
-		);
-	}
+async function loadLiteParse(plugin: Plugin, debug: boolean): Promise<unknown> {
+	return ensureLiteParse(plugin, debug);
 }
 
 function withTimeout<T>(p: Promise<T>, seconds: number, label: string): Promise<T> {
@@ -119,11 +111,12 @@ function renderMarkdownFromResult(result: {
 }
 
 export async function parsePdf(
+	plugin: Plugin,
 	absolutePath: string,
 	settings: LiteParsePluginSettings,
 ): Promise<NormalizedParseResult> {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const LiteParseCtor: any = await loadLiteParse();
+	const LiteParseCtor: any = await loadLiteParse(plugin, settings.debugLogging);
 	if (typeof LiteParseCtor !== "function") {
 		throw new Error("@llamaindex/liteparse: LiteParse class not found in module exports.");
 	}
@@ -166,21 +159,5 @@ export async function parsePdf(
 	return { markdown, text, json, pageCount };
 }
 
-/**
- * Best-effort sanity check at plugin load time: warn (don't fail) if the
- * native LiteParse module cannot be required. Returned promise never rejects.
- */
-export async function probeLiteParseAvailable(): Promise<boolean> {
-	try {
-		await loadLiteParse();
-		return true;
-	} catch (err) {
-		new Notice(
-			"LiteParse PDF Parser: native dependency failed to load. " +
-			"See README for desktop install steps.",
-			10_000,
-		);
-		console.error("[liteparse-pdf-parser] LiteParse load failed:", err);
-		return false;
-	}
-}
+// Module-availability probe removed: installation is now lazy and happens
+// at first parse via ensureLiteParse(). See installer.ts.
