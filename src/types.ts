@@ -145,7 +145,7 @@ export const DEFAULT_SETTINGS: LiteParsePluginSettings = {
 
 	autoDetectColumns: true,
 	columnGutterMinPct: 5,
-	columnFullWidthThresholdPct: 60,
+	columnFullWidthThresholdPct: 50,
 
 	templates: [],
 };

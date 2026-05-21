@@ -330,7 +330,7 @@ function applyTemplateToPage(
 
 	if (includeRects.length === 0) {
 		const lines =
-			(tryColumns && splitIntoColumns(survivors, 0, pageW, ctx.settings)) ||
+			(tryColumns && splitIntoColumns(survivors, 0, pageW, ctx.settings, ctx.baseFontSize)) ||
 			buildLines(survivors);
 		const body = emitLines(lines, ctx);
 		return body ? [{ heading: null, body }] : [];
@@ -343,7 +343,7 @@ function applyTemplateToPage(
 		const eligibleForColumns = tryColumns && rectWidthFrac >= 0.6;
 		const lines =
 			(eligibleForColumns &&
-				splitIntoColumns(inside, rect.xMin, rect.xMax, ctx.settings)) ||
+				splitIntoColumns(inside, rect.xMin, rect.xMax, ctx.settings, ctx.baseFontSize)) ||
 			buildLines(inside);
 		const body = emitLines(lines, ctx);
 		if (!body) continue;
@@ -381,7 +381,7 @@ export function renderPage(
 	const pageW = Number(page.width ?? 612);
 	const lines =
 		(settings.autoDetectColumns &&
-			splitIntoColumns(pageItems, 0, pageW, settings)) ||
+			splitIntoColumns(pageItems, 0, pageW, settings, baseFontSize)) ||
 		buildLines(pageItems);
 	const body = emitLines(lines, ctx);
 	return body ? [{ heading: null, body }] : [];
@@ -543,11 +543,13 @@ function splitIntoColumns(
 	scopeXMin: number,
 	scopeXMax: number,
 	settings: LiteParsePluginSettings,
+	baseFontSize: number,
 ): ReflowLine[] | null {
 	if (items.length < 6) return null;
 	const scopeWidth = Math.max(1, scopeXMax - scopeXMin);
 	const fullWidthFrac = Math.max(0, Math.min(1, settings.columnFullWidthThresholdPct / 100));
 	const gutterFrac = Math.max(0.005, Math.min(0.5, settings.columnGutterMinPct / 100));
+	const headingMult = Math.max(1, settings.headingFontMultiplier);
 
 	// Build candidate lines first so we can detect full-width lines.
 	const lines = buildLines(items);
@@ -570,7 +572,12 @@ function splitIntoColumns(
 	for (const line of lines) {
 		const { lo, hi } = lineXSpan(line);
 		const span = hi - lo;
-		if (span / scopeWidth > fullWidthFrac) fullWidthLines.push(line);
+		// Two paths to full-width: spans more than the configured fraction,
+		// or is heading-sized font (so slide titles even at ~60% width get
+		// promoted above the column split).
+		const headingSized =
+			baseFontSize > 0 && line.maxFontSize >= baseFontSize * headingMult;
+		if (span / scopeWidth > fullWidthFrac || headingSized) fullWidthLines.push(line);
 		else columnLines.push(line);
 	}
 	if (columnLines.length < 4) return null;

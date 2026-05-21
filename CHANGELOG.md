@@ -6,6 +6,33 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-05-21
+
+### Fixed
+
+- **Column auto-detect handles heading-sized titles.** Slide titles
+  spanning ~60% width (e.g. "Grading – Online Tests" on a TUGraz AI-1
+  Organisation slide) didn't clear the >60% full-width threshold, so
+  their items got binned with the column items and straddled the
+  vertical gutter. That killed gutter detection and the parser fell
+  back to single-column reflow, producing line-by-line interleaving
+  of the two columns. Two fixes:
+  - Lowered default `columnFullWidthThresholdPct` 60 → 50.
+  - Lines whose max font size is at least `baseFontSize ×
+    headingFontMultiplier` (i.e. would otherwise be detected as
+    headings) are now classified as full-width regardless of their
+    x-span. So slide titles always sit above the column split even
+    when they don't span the page edge-to-edge.
+
+### Note on tables
+
+- Tables on slide bodies (e.g. the Grade / % grid on the Grading
+  slide) are still emitted as plain lines with the same x-spacing
+  preserved. Detecting tables and emitting Markdown table syntax
+  reliably is out of scope for now — heuristics there fail badly on
+  prose with tab-aligned numbers. Manual conversion or a dedicated
+  template region for the table is the recommended workaround.
+
 ## [0.6.5] - 2026-05-21
 
 ### Fixed
