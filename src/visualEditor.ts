@@ -3,7 +3,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { mkdtempSync, readFileSync, rmSync } from "fs";
 import {
+	liteparseParsePage,
 	liteparseScreenshot,
+	LiteParsePageJson,
+	LiteParseTextItem,
 	resolvePluginPaths,
 } from "./installer";
 import LiteParsePlugin from "./main";
@@ -87,6 +90,7 @@ export class VisualRegionEditorModal extends Modal {
 	private probes: DraftProbe[] = [];
 	private currentRole: "include" | "exclude" = "exclude";
 	private mode: DrawingMode = "regions";
+	private currentPage: LiteParsePageJson | null = null;
 
 	constructor(
 		app: App,
@@ -96,6 +100,7 @@ export class VisualRegionEditorModal extends Modal {
 		siblingTemplateNames: string[],
 		onSave: (result: VisualEditorResult) => void,
 		initialPdfPath?: string,
+		initialMode: DrawingMode = "regions",
 	) {
 		super(app);
 		this.plugin = plugin;
@@ -104,6 +109,7 @@ export class VisualRegionEditorModal extends Modal {
 		this.initialProbes = initialProbes;
 		this.siblingTemplateNames = siblingTemplateNames;
 		this.initialPdfPath = initialPdfPath;
+		this.mode = initialMode;
 	}
 
 	onOpen(): void {
@@ -165,6 +171,7 @@ export class VisualRegionEditorModal extends Modal {
 		roleSelect.addEventListener("change", () => {
 			this.currentRole = roleSelect.value as "include" | "exclude";
 		});
+		roleSelect.style.display = this.mode === "regions" ? "" : "none";
 		this.roleSelectEl = roleSelect;
 
 		modeSelect.addEventListener("change", () => {
@@ -340,17 +347,70 @@ export class VisualRegionEditorModal extends Modal {
 			);
 			this.screenshotPath = pngPath;
 			const bytes = readFileSync(pngPath);
-			// Build base64 data URL — bytes are small (single PNG page).
 			const b64 = bytes.toString("base64");
 			if (this.imgEl) this.imgEl.src = `data:image/png;base64,${b64}`;
 			this.setStatus(
 				`Loaded ${this.pdf.name} page ${this.pageNumber}. Drag on the page to draw a region. ` +
 				`Current role: ${this.currentRole}.`,
 			);
+			// Pull text items for the page so probe rows can preview the text
+			// that falls inside each rectangle. Don't block the screenshot —
+			// run as a background fetch, refresh probe list when it lands.
+			void liteparseParsePage(paths, abs, this.pageNumber, this.plugin.settings.debugLogging)
+				.then((p) => {
+					this.currentPage = p;
+					this.renderProbeList();
+				})
+				.catch((err) => {
+					if (this.plugin.settings.debugLogging)
+						console.debug("[liteparse-pdf-parser] page parse failed", err);
+				});
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this.setStatus(`Failed to render page: ${msg}`, true);
 		}
+	}
+
+	private extractTextForRect(
+		xPct: number,
+		yPct: number,
+		wPct: number,
+		hPct: number,
+	): string {
+		const page = this.currentPage;
+		if (!page) return "";
+		const items = page.textItems;
+		if (!items || items.length === 0) return "";
+		const x = Math.max(0, Math.min(100, xPct));
+		const y = Math.max(0, Math.min(100, yPct));
+		const w = Math.max(0, Math.min(100 - x, wPct));
+		const h = Math.max(0, Math.min(100 - y, hPct));
+		const xMin = (x / 100) * page.width;
+		const xMax = ((x + w) / 100) * page.width;
+		const yMin = (y / 100) * page.height;
+		const yMax = ((y + h) / 100) * page.height;
+		const inside: LiteParseTextItem[] = [];
+		for (const it of items) {
+			const ix = Number(it.x ?? 0);
+			const iy = Number(it.y ?? 0);
+			const iw = Number(it.width ?? it.w ?? 0);
+			const ih = Number(it.height ?? it.h ?? it.fontSize ?? 0);
+			const cx = ix + iw / 2;
+			const cy = iy + ih / 2;
+			if (cx >= xMin && cx <= xMax && cy >= yMin && cy <= yMax) inside.push(it);
+		}
+		if (inside.length === 0) return "";
+		inside.sort((a, b) => {
+			const ay = Number(a.y ?? 0);
+			const by = Number(b.y ?? 0);
+			if (Math.abs(ay - by) > 0.5) return ay - by;
+			return Number(a.x ?? 0) - Number(b.x ?? 0);
+		});
+		return inside
+			.map((it) => String(it.text ?? it.str ?? ""))
+			.join(" ")
+			.replace(/\s+/g, " ")
+			.trim();
 	}
 
 	private attachDrawHandlers(overlay: HTMLDivElement): void {
@@ -578,6 +638,25 @@ export class VisualRegionEditorModal extends Modal {
 				"No probes. Switch Draw to Probes and drag a small area on the page to add one.",
 			);
 		}
+		const previewCells: Array<{ probeId: number; el: HTMLElement }> = [];
+		const refreshPreview = (probeId: number) => {
+			const cell = previewCells.find((p) => p.probeId === probeId);
+			if (!cell) return;
+			const probe = this.probes.find((p) => p.id === probeId);
+			if (!probe) return;
+			const text = this.extractTextForRect(probe.xPct, probe.yPct, probe.wPct, probe.hPct);
+			if (!this.currentPage) {
+				cell.el.setText("(load a page to preview probe text)");
+				cell.el.style.color = "var(--text-muted)";
+			} else if (!text) {
+				cell.el.setText("(no text in this area on this page)");
+				cell.el.style.color = "var(--text-muted)";
+			} else {
+				cell.el.setText(text);
+				cell.el.style.color = "var(--text-normal)";
+			}
+		};
+
 		this.probes.forEach((probe, idx) => {
 			const tr = tbody.createEl("tr");
 			tr.style.transition = "background 80ms ease";
@@ -627,6 +706,7 @@ export class VisualRegionEditorModal extends Modal {
 					if (Number.isFinite(n)) {
 						(probe as unknown as Record<string, number>)[k] = n;
 						this.renderRegionOverlays();
+						refreshPreview(probe.id);
 					}
 				};
 			}
@@ -695,6 +775,23 @@ export class VisualRegionEditorModal extends Modal {
 				this.renderProbeList();
 				this.renderRegionOverlays();
 			};
+
+			const previewTr = tbody.createEl("tr");
+			const labelTd = previewTr.createEl("td");
+			labelTd.setText("text:");
+			labelTd.style.color = "var(--text-muted)";
+			labelTd.style.fontSize = "0.8em";
+			labelTd.style.textAlign = "right";
+			labelTd.style.paddingRight = "0.4rem";
+			const previewTd = previewTr.createEl("td");
+			previewTd.colSpan = 10;
+			previewTd.style.fontFamily = "var(--font-monospace)";
+			previewTd.style.fontSize = "0.8em";
+			previewTd.style.whiteSpace = "normal";
+			previewTd.style.wordBreak = "break-word";
+			previewTd.style.padding = "0.1rem 0 0.4rem 0";
+			previewCells.push({ probeId: probe.id, el: previewTd });
+			refreshPreview(probe.id);
 			void idx;
 		});
 	}

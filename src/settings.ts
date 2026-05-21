@@ -582,9 +582,11 @@ export class LiteParseSettingTab extends PluginSettingTab {
 
 		const probes = tpl.probes ?? [];
 
-		const tbl = wrap.createEl("table");
-		tbl.style.width = "100%";
+		const scroller = wrap.createDiv();
+		scroller.style.overflowX = "auto";
+		const tbl = scroller.createEl("table");
 		tbl.style.fontSize = "0.85em";
+		tbl.style.whiteSpace = "nowrap";
 		const thead = tbl.createEl("thead").createEl("tr");
 		for (const h of ["Name", "x", "y", "w", "h", "Pattern", "Flags", "On match", "Target", "↑", "↓", ""]) {
 			const th = thead.createEl("th", { text: h });
@@ -616,12 +618,12 @@ export class LiteParseSettingTab extends PluginSettingTab {
 				return input;
 			};
 
-			mkInput("text", probe.name, "8rem", "probe_1", async (v) => {
+			mkInput("text", probe.name, "6rem", "probe_1", async (v) => {
 				probe.name = v;
 				await this.plugin.saveSettings();
 			});
 			for (const k of ["x", "y", "w", "h"] as const) {
-				mkInput("number", String(probe[k]), "4rem", "", async (v) => {
+				mkInput("number", String(probe[k]), "3.2rem", "", async (v) => {
 					const n = Number(v);
 					if (Number.isFinite(n)) {
 						probe[k] = n;
@@ -632,7 +634,7 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			const patternInput = mkInput(
 				"text",
 				probe.pattern,
-				"10rem",
+				"8rem",
 				"^Exercise\\b",
 				async (v) => {
 					probe.pattern = v;
@@ -640,7 +642,7 @@ export class LiteParseSettingTab extends PluginSettingTab {
 				},
 			);
 			patternInput.style.fontFamily = "var(--font-monospace)";
-			const flagsInput = mkInput("text", probe.flags ?? "", "3rem", "i", async (v) => {
+			const flagsInput = mkInput("text", probe.flags ?? "", "2.5rem", "i", async (v) => {
 				if (v) probe.flags = v;
 				else delete probe.flags;
 				await this.plugin.saveSettings();
@@ -721,8 +723,12 @@ export class LiteParseSettingTab extends PluginSettingTab {
 		};
 		probes.forEach(drawRow);
 
-		const addBtn = wrap.createEl("button", { text: "+ Probe" });
-		addBtn.style.marginTop = "0.3rem";
+		const probeBtnRow = wrap.createDiv();
+		probeBtnRow.style.display = "flex";
+		probeBtnRow.style.gap = "0.5rem";
+		probeBtnRow.style.marginTop = "0.3rem";
+
+		const addBtn = probeBtnRow.createEl("button", { text: "+ Probe" });
 		addBtn.onclick = async () => {
 			const arr = ensureProbes();
 			arr.push({
@@ -737,12 +743,17 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			await this.plugin.saveSettings();
 			this.display();
 		};
+
+		const drawBtn = probeBtnRow.createEl("button", { text: "Draw probes visually…" });
+		drawBtn.onclick = () => this.openVisualEditor(tpl, "probes");
 	}
 
 	private renderRegionRows(card: HTMLElement, tpl: ParsingTemplate): void {
-		const tbl = card.createEl("table");
+		const scroller = card.createDiv();
+		scroller.style.overflowX = "auto";
+		scroller.style.marginTop = "0.5rem";
+		const tbl = scroller.createEl("table");
 		tbl.style.width = "100%";
-		tbl.style.marginTop = "0.5rem";
 		tbl.style.fontSize = "0.85em";
 		const head = tbl.createEl("thead").createEl("tr");
 		for (const h of ["Region", "Role", "x", "y", "w", "h", "H#", ""]) {
@@ -838,30 +849,33 @@ export class LiteParseSettingTab extends PluginSettingTab {
 			this.display();
 		};
 
-		const visualBtn = btnRow.createEl("button", { text: "Edit visually…" });
-		visualBtn.onclick = () => {
-			const initialPdfPath = this.guessInitialPdfPath(tpl);
-			const siblings = this.plugin.settings.templates
-				.map((t) => t.name)
-				.filter((n) => n && n !== tpl.name);
-			new VisualRegionEditorModal(
-				this.app,
-				this.plugin,
-				tpl.regions,
-				tpl.probes ?? [],
-				siblings,
-				async ({ regions, probes }) => {
-					tpl.regions = regions;
-					tpl.probes = probes.length ? probes : undefined;
-					await this.plugin.saveSettings();
-					new Notice(
-						`LiteParse: saved ${regions.length} region(s) and ${probes.length} probe(s) for ${tpl.name}.`,
-					);
-					this.display();
-				},
-				initialPdfPath,
-			).open();
-		};
+		const visualBtn = btnRow.createEl("button", { text: "Edit visually (regions + probes)…" });
+		visualBtn.onclick = () => this.openVisualEditor(tpl, "regions");
+	}
+
+	private openVisualEditor(tpl: ParsingTemplate, initialMode: "regions" | "probes"): void {
+		const initialPdfPath = this.guessInitialPdfPath(tpl);
+		const siblings = this.plugin.settings.templates
+			.map((t) => t.name)
+			.filter((n) => n && n !== tpl.name);
+		new VisualRegionEditorModal(
+			this.app,
+			this.plugin,
+			tpl.regions,
+			tpl.probes ?? [],
+			siblings,
+			async ({ regions, probes }) => {
+				tpl.regions = regions;
+				tpl.probes = probes.length ? probes : undefined;
+				await this.plugin.saveSettings();
+				new Notice(
+					`LiteParse: saved ${regions.length} region(s) and ${probes.length} probe(s) for ${tpl.name}.`,
+				);
+				this.display();
+			},
+			initialPdfPath,
+			initialMode,
+		).open();
 	}
 
 	/**

@@ -187,6 +187,102 @@ export async function liteparseScreenshot(
 	});
 }
 
+export interface LiteParseTextItem {
+	text?: string;
+	str?: string;
+	x?: number;
+	y?: number;
+	width?: number;
+	height?: number;
+	w?: number;
+	h?: number;
+	fontSize?: number;
+	fontName?: string;
+}
+
+export interface LiteParsePageJson {
+	width: number;
+	height: number;
+	textItems: LiteParseTextItem[];
+}
+
+/**
+ * Parse a single page of a PDF via the LiteParse CLI and return its
+ * width/height/textItems. Used by the visual editor to show a live preview
+ * of what text falls inside a probe rectangle so the user can shape their
+ * regex against the real PDF text.
+ */
+export async function liteparseParsePage(
+	paths: PluginPaths,
+	pdfAbsolutePath: string,
+	pageNumber: number,
+	debug: boolean,
+): Promise<LiteParsePageJson> {
+	const args = [
+		paths.liteparseCli,
+		"parse",
+		pdfAbsolutePath,
+		"--format",
+		"json",
+		"--target-pages",
+		String(pageNumber),
+		"--no-ocr",
+		"--quiet",
+	];
+	return new Promise<LiteParsePageJson>((resolve, reject) => {
+		const env = { ...process.env, PATH: augmentedPath() };
+		const child = spawn(nodeCommand(), args, {
+			cwd: paths.pluginDir,
+			env,
+			shell: process.platform === "win32",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (c: string) => {
+			stdout += c;
+		});
+		child.stderr.on("data", (c: string) => {
+			stderr += c;
+			if (debug) console.debug("[liteparse-pdf-parser][parse-page]", c.trim());
+		});
+		child.on("error", reject);
+		child.on("close", (code) => {
+			if (code !== 0) {
+				reject(
+					new Error(
+						`liteparse parse exited with code ${code}. ` +
+						(stderr.trim().slice(-400) || "no stderr"),
+					),
+				);
+				return;
+			}
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const json: any = JSON.parse(stdout);
+				const pages: any[] = Array.isArray(json.pages) ? json.pages : []; // eslint-disable-line @typescript-eslint/no-explicit-any
+				const page = pages.find(
+					(p) => Number(p.page ?? p.pageNum ?? 0) === pageNumber,
+				) ?? pages[0];
+				if (!page) {
+					reject(new Error(`liteparse parse returned no page ${pageNumber}`));
+					return;
+				}
+				resolve({
+					width: Number(page.width ?? 612),
+					height: Number(page.height ?? 792),
+					textItems: Array.isArray(page.textItems) ? page.textItems : [],
+				});
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				reject(new Error(`liteparse parse JSON invalid: ${msg}`));
+			}
+		});
+	});
+}
+
 export interface InstallProgress {
 	(message: string): void;
 }

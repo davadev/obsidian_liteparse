@@ -6,6 +6,36 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-21
+
+### Fixed
+
+- **Template card overflow.** The new probes table pushed the whole
+  settings dialog wider than its container, producing a horizontal
+  scrollbar across the entire modal. Both the regions table and the
+  probes table now live inside per-card `overflow-x: auto` scrollers, so
+  long rows scroll inside the card without breaking the modal layout.
+  Probe input widths trimmed (Name 6rem, coords 3.2rem, Pattern 8rem,
+  Flags 2.5rem) for better single-row fit.
+
+### Added
+
+- **Probe text preview in the visual editor.** When a page is loaded in
+  the visual editor, LiteParse is asked for that page's text items in
+  the background. Each probe row in the editor now shows a `text: …`
+  line underneath it with the actual extracted text that falls inside
+  the probe rectangle. Updates live as the probe x/y/w/h change. Use
+  this to shape your regex against the real PDF text instead of
+  guessing.
+- **"Draw probes visually…" button** next to "+ Probe" on each template
+  card, opening the visual editor pre-switched to probe-drawing mode.
+- The main visual-editor button is now labelled **"Edit visually
+  (regions + probes)…"** so users see that both are editable there.
+- `liteparseParsePage` helper in `installer.ts` — single-page parse via
+  the LiteParse CLI returning `width`, `height`, and `textItems`. Used
+  by the visual editor's probe preview; no impact on the main parse
+  pipeline.
+
 ## [0.6.0] - 2026-05-21
 
 ### Added
