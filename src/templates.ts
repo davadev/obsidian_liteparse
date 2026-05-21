@@ -456,18 +456,16 @@ function evaluateProbes(
 			continue;
 		}
 		const sample = text(probe);
-		if (re.test(sample)) {
-			if (debug) {
-				console.debug(
-					"[liteparse-pdf-parser] probe match",
-					template.name,
-					probe.name,
-					"=>",
-					probe.onMatch,
-				);
-			}
-			return probe.onMatch;
+		const matched = re.test(sample);
+		if (debug) {
+			const pageNum = Number(page.page ?? page.pageNum ?? 0);
+			console.debug(
+				`[liteparse-pdf-parser] probe ${template.name}/${probe.name} on page ${pageNum}: ` +
+				`text=${JSON.stringify(sample.slice(0, 80))} pattern=/${probe.pattern}/${probe.flags ?? ""} ` +
+				`=> ${matched ? "MATCH" : "no match"}`,
+			);
 		}
+		if (matched) return probe.onMatch;
 	}
 	return null;
 }

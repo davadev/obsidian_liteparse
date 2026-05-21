@@ -226,17 +226,25 @@ function detectTitleSlide(body: string): { isTitle: boolean; title: string } {
 	return { isTitle: title.length > 0, title };
 }
 
+export interface ParseDiagnostics {
+	selectedTemplateName: string | null;
+	probesSkippedPages: number[];
+	probesSwitchedPages: { page: number; fromTemplate: string; toTemplate: string }[];
+}
+
 function renderMarkdownFromPages(
 	pages: RawPage[],
 	settings: LiteParsePluginSettings,
 	pdfVaultPath: string,
 	templateOverride: ParsingTemplate | null | undefined,
 	invalidProbes?: Set<string>,
+	diagnostics?: ParseDiagnostics,
 ): string {
 	const autoMatched =
 		templateOverride === undefined
 			? selectTemplate(settings.templates, pdfVaultPath)
 			: templateOverride;
+	if (diagnostics) diagnostics.selectedTemplateName = autoMatched?.name ?? null;
 	const baseFontSize = computeBaseFontSize(pages);
 	const divider = (settings.pageDivider ?? "").trim();
 	interface Block {
@@ -257,7 +265,17 @@ function renderMarkdownFromPages(
 				settings.debugLogging,
 				invalidProbes,
 			);
-			if (resolved.skip) continue;
+			if (resolved.skip) {
+				if (diagnostics) diagnostics.probesSkippedPages.push(num);
+				continue;
+			}
+			if (resolved.template && resolved.template !== autoMatched && diagnostics) {
+				diagnostics.probesSwitchedPages.push({
+					page: num,
+					fromTemplate: autoMatched.name,
+					toTemplate: resolved.template.name,
+				});
+			}
 			pageTemplate = resolved.template;
 		}
 		const templatePages = templatePageFilter(pageTemplate);
@@ -362,12 +380,18 @@ export async function parsePdf(
 	const r: any = parsed;
 	const pages: RawPage[] = Array.isArray(r.pages) ? r.pages : [];
 	const invalidProbes = new Set<string>();
+	const diagnostics: ParseDiagnostics = {
+		selectedTemplateName: null,
+		probesSkippedPages: [],
+		probesSwitchedPages: [],
+	};
 	const markdown = renderMarkdownFromPages(
 		pages,
 		settings,
 		pdfVaultPath,
 		templateOverride,
 		invalidProbes,
+		diagnostics,
 	);
 	if (invalidProbes.size > 0) {
 		const list = Array.from(invalidProbes).slice(0, 3).join("; ");
@@ -375,6 +399,23 @@ export async function parsePdf(
 			`LiteParse: ${invalidProbes.size} probe(s) had invalid regex and were skipped: ${list}`,
 			10000,
 		);
+	}
+	if (templateOverride === undefined) {
+		const t = diagnostics.selectedTemplateName ?? "(none — using defaults)";
+		const skipped = diagnostics.probesSkippedPages.length;
+		const switched = diagnostics.probesSwitchedPages.length;
+		const parts: string[] = [`template: ${t}`];
+		if (skipped > 0) {
+			const pages = diagnostics.probesSkippedPages.slice(0, 6).join(", ");
+			parts.push(`skipped ${skipped} page(s) [${pages}${skipped > 6 ? ", …" : ""}] via probes`);
+		}
+		if (switched > 0) {
+			parts.push(`switched ${switched} page(s) via probes`);
+		}
+		new Notice(`LiteParse: ${parts.join("; ")}`, 6000);
+		if (settings.debugLogging) {
+			console.debug("[liteparse-pdf-parser] parse diagnostics", diagnostics);
+		}
 	}
 	const text: string =
 		typeof r.text === "string"

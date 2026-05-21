@@ -6,6 +6,23 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-21
+
+### Added
+
+- **Post-parse diagnostics Notice.** Every parse (with auto-template
+  match) now shows a short Notice naming the template that was
+  selected, the number of pages probes skipped (with page numbers), and
+  the number of pages probes switched. If you see "template: (none —
+  using defaults)" the auto-match regex didn't match the PDF path; if
+  the skipped count is 0 the probe didn't fire (either text didn't
+  match, regex was invalid, or you're on the wrong template).
+- **Per-probe-per-page debug log.** With Debug logging on, the console
+  now shows for every probe evaluation: the extracted text (first 80
+  chars), the pattern, and MATCH/no match. This is the cheapest way to
+  understand why a probe isn't firing — turn on Debug logging in
+  settings, open the developer console, re-parse.
+
 ## [0.6.2] - 2026-05-21
 
 ### Added
