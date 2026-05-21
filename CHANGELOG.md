@@ -6,6 +6,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-05-21
+
+### Fixed
+
+- **Probes now run for explicit template selections too.** Previously
+  the parser only ran probes when `templateOverride === undefined`
+  (auto-match path). Picking a template via the
+  "Parse PDF with LiteParse (choose template)…" command — or the
+  "Auto" sentinel that resolves to the matched template — passed the
+  template as an override, which silently bypassed the probe pipeline
+  entirely. The probe might match in the visual editor preview but
+  never fire during the actual parse. Probes now run whenever there is
+  an effective template, regardless of how it was chosen.
+- **Diagnostics Notice always shows.** No longer gated on the
+  auto-match path. After every parse you see which template was used
+  and how many pages probes skipped / switched, even when you picked
+  the template explicitly. The console always logs the diagnostics
+  object too (not gated on Debug logging).
+
 ## [0.6.4] - 2026-05-21
 
 ### Fixed

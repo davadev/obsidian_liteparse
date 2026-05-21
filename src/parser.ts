@@ -244,7 +244,11 @@ function renderMarkdownFromPages(
 		templateOverride === undefined
 			? selectTemplate(settings.templates, pdfVaultPath)
 			: templateOverride;
-	if (diagnostics) diagnostics.selectedTemplateName = autoMatched?.name ?? null;
+	if (diagnostics) {
+		diagnostics.selectedTemplateName =
+			autoMatched?.name ??
+			(templateOverride === null ? "(forced none)" : null);
+	}
 	const baseFontSize = computeBaseFontSize(pages);
 	const divider = (settings.pageDivider ?? "").trim();
 	interface Block {
@@ -257,7 +261,7 @@ function renderMarkdownFromPages(
 		idx++;
 		const num = pageNumberOf(page, idx);
 		let pageTemplate: ParsingTemplate | null = autoMatched;
-		if (templateOverride === undefined && autoMatched) {
+		if (autoMatched) {
 			const resolved = resolveEffectiveTemplate(
 				autoMatched,
 				page,
@@ -400,8 +404,8 @@ export async function parsePdf(
 			10000,
 		);
 	}
-	if (templateOverride === undefined) {
-		const t = diagnostics.selectedTemplateName ?? "(none — using defaults)";
+	{
+		const t = diagnostics.selectedTemplateName ?? "(none)";
 		const skipped = diagnostics.probesSkippedPages.length;
 		const switched = diagnostics.probesSwitchedPages.length;
 		const parts: string[] = [`template: ${t}`];
@@ -413,9 +417,7 @@ export async function parsePdf(
 			parts.push(`switched ${switched} page(s) via probes`);
 		}
 		new Notice(`LiteParse: ${parts.join("; ")}`, 6000);
-		if (settings.debugLogging) {
-			console.debug("[liteparse-pdf-parser] parse diagnostics", diagnostics);
-		}
+		console.debug("[liteparse-pdf-parser] parse diagnostics", diagnostics);
 	}
 	const text: string =
 		typeof r.text === "string"
