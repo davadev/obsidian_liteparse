@@ -22,6 +22,25 @@ interface DraftRegion {
 
 let nextId = 1;
 
+const REGION_COLORS = [
+	"#e3603e",
+	"#3eaae3",
+	"#6bb05f",
+	"#b366e3",
+	"#e3c93e",
+	"#3ee3c0",
+	"#e33e94",
+	"#7c8de3",
+	"#e38e3e",
+	"#5fe3a1",
+	"#c14a4a",
+	"#4a8cc1",
+];
+
+function colorForIndex(i: number): string {
+	return REGION_COLORS[i % REGION_COLORS.length];
+}
+
 export class VisualRegionEditorModal extends Modal {
 	private readonly plugin: LiteParsePlugin;
 	private readonly onSave: (regions: TemplateRegion[]) => void;
@@ -260,6 +279,11 @@ export class VisualRegionEditorModal extends Modal {
 
 		overlay.addEventListener("mousedown", (e: MouseEvent) => {
 			if (!this.imgEl?.src) return;
+			// Ignore mousedown that originated on an existing region rect —
+			// otherwise hovering an overlapping rect creates accidental new
+			// rects on click.
+			const target = e.target as HTMLElement;
+			if (target.classList?.contains("liteparse-vis-rect")) return;
 			e.preventDefault();
 			const { x, y } = toPct(e.clientX, e.clientY);
 			startX = x;
@@ -316,40 +340,62 @@ export class VisualRegionEditorModal extends Modal {
 		});
 	}
 
+	private rectEls: Map<number, HTMLDivElement> = new Map();
+	private rowEls: Map<number, HTMLTableRowElement> = new Map();
+
 	private renderRegionOverlays(): void {
 		if (!this.overlayEl) return;
-		// Strip any previously-rendered persistent rectangles (tagged class).
 		this.overlayEl
 			.querySelectorAll(".liteparse-vis-rect")
 			.forEach((el) => el.remove());
-		for (const r of this.regions) {
-			const div = this.overlayEl.createDiv({ cls: "liteparse-vis-rect" });
+		this.rectEls.clear();
+		this.regions.forEach((r, idx) => {
+			const div = this.overlayEl!.createDiv({ cls: "liteparse-vis-rect" });
 			div.style.position = "absolute";
 			div.style.left = `${r.xPct}%`;
 			div.style.top = `${r.yPct}%`;
 			div.style.width = `${r.wPct}%`;
 			div.style.height = `${r.hPct}%`;
-			div.style.pointerEvents = "none";
 			div.style.boxSizing = "border-box";
-			const color =
-				r.role === "exclude"
-					? "rgba(255, 80, 80, 0.85)"
-					: "rgba(80, 160, 255, 0.85)";
-			div.style.border = `2px solid ${color}`;
-			div.style.background =
-				r.role === "exclude"
-					? "rgba(255, 80, 80, 0.15)"
-					: "rgba(80, 160, 255, 0.15)";
+			div.style.cursor = "pointer";
+			div.style.transition = "background 80ms ease, z-index 0s";
+			const color = colorForIndex(idx);
+			const borderStyle = r.role === "include" ? "dashed" : "solid";
+			div.style.border = `2px ${borderStyle} ${color}`;
+			div.style.background = "transparent";
+			div.style.zIndex = "1";
+			div.dataset.regionId = String(r.id);
+
 			const label = div.createDiv({ text: `${r.name} (${r.role})` });
 			label.style.position = "absolute";
-			label.style.top = "0";
-			label.style.left = "0";
+			label.style.top = "-1.05em";
+			label.style.left = "-2px";
 			label.style.padding = "0 4px";
 			label.style.background = color;
 			label.style.color = "#fff";
 			label.style.fontSize = "0.7em";
 			label.style.fontWeight = "600";
-		}
+			label.style.borderRadius = "2px 2px 0 0";
+			label.style.whiteSpace = "nowrap";
+			label.style.pointerEvents = "none";
+
+			const hoverIn = () => {
+				div.style.background = `${color}33`; // ~20% alpha hex
+				div.style.zIndex = "10";
+				const row = this.rowEls.get(r.id);
+				if (row) row.style.background = `${color}1f`;
+			};
+			const hoverOut = () => {
+				div.style.background = "transparent";
+				div.style.zIndex = "1";
+				const row = this.rowEls.get(r.id);
+				if (row) row.style.background = "";
+			};
+			div.addEventListener("mouseenter", hoverIn);
+			div.addEventListener("mouseleave", hoverOut);
+
+			this.rectEls.set(r.id, div);
+		});
 	}
 
 	private renderRegionList(): void {
@@ -366,13 +412,42 @@ export class VisualRegionEditorModal extends Modal {
 		tbl.style.width = "100%";
 		tbl.style.fontSize = "0.85em";
 		const thead = tbl.createEl("thead").createEl("tr");
-		for (const h of ["Name", "Role", "x", "y", "w", "h", ""]) {
+		for (const h of ["", "Name", "Role", "x", "y", "w", "h", ""]) {
 			const th = thead.createEl("th", { text: h });
 			th.style.textAlign = "left";
 		}
 		const tbody = tbl.createEl("tbody");
-		for (const region of this.regions) {
+		this.rowEls.clear();
+		this.regions.forEach((region, idx) => {
 			const tr = tbody.createEl("tr");
+			tr.style.transition = "background 80ms ease";
+			this.rowEls.set(region.id, tr);
+			tr.addEventListener("mouseenter", () => {
+				const rect = this.rectEls.get(region.id);
+				if (rect) {
+					rect.style.background = `${colorForIndex(idx)}33`;
+					rect.style.zIndex = "10";
+				}
+				tr.style.background = `${colorForIndex(idx)}1f`;
+			});
+			tr.addEventListener("mouseleave", () => {
+				const rect = this.rectEls.get(region.id);
+				if (rect) {
+					rect.style.background = "transparent";
+					rect.style.zIndex = "1";
+				}
+				tr.style.background = "";
+			});
+
+			const swatchTd = tr.createEl("td");
+			const sw = swatchTd.createSpan();
+			sw.style.display = "inline-block";
+			sw.style.width = "0.9em";
+			sw.style.height = "0.9em";
+			sw.style.borderRadius = "2px";
+			sw.style.background = colorForIndex(idx);
+			sw.style.marginRight = "0.25rem";
+
 			const nameTd = tr.createEl("td");
 			const nameInput = nameTd.createEl("input", { type: "text" });
 			nameInput.value = region.name;
@@ -413,7 +488,7 @@ export class VisualRegionEditorModal extends Modal {
 				this.regions = this.regions.filter((r) => r.id !== region.id);
 				this.renderRegionList();
 			};
-		}
+		});
 		this.renderRegionOverlays();
 	}
 }

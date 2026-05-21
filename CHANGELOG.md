@@ -6,6 +6,32 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-21
+
+### Changed
+
+- **Visual editor: overlapping regions are now distinguishable.** Each
+  region gets a unique color from a 12-entry palette (instead of just
+  red=exclude / blue=include). Default render is borders-only (solid
+  for excludes, dashed for includes) with no fill, so stacked regions
+  don't visually merge into a single blob. Hovering a region — either
+  on the page or its row in the table — fills it with a translucent
+  tint, lifts it above its neighbors via `z-index`, and highlights the
+  matching row. A color swatch column was added to the regions table
+  to mirror the on-page color.
+- Mousedown that originates on an existing region rectangle no longer
+  starts drawing a new region (fixes accidental new-rect creation when
+  the user just wanted to inspect an overlap).
+
+### Notes
+
+- Confirmed: exclude regions defined inside an include region work
+  as expected. `applyTemplateToPage` filters all items through every
+  exclude rectangle first, then bins the survivors into the include
+  rectangles — so a "numbers" exclude nested inside "body" include
+  drops those items from the body's text. This was already the
+  behavior in 0.2.0+.
+
 ## [0.4.0] - 2026-05-21
 
 ### Added
