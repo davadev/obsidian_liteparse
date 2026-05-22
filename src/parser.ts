@@ -406,9 +406,15 @@ export async function parsePdf(
 	}
 	{
 		const t = diagnostics.selectedTemplateName ?? "(none)";
+		const source =
+			templateOverride === undefined
+				? "auto"
+				: templateOverride === null
+					? "forced none"
+					: "picked";
 		const skipped = diagnostics.probesSkippedPages.length;
 		const switched = diagnostics.probesSwitchedPages.length;
-		const parts: string[] = [`template: ${t}`];
+		const parts: string[] = [`template: ${t} (${source})`];
 		if (skipped > 0) {
 			const pages = diagnostics.probesSkippedPages.slice(0, 6).join(", ");
 			parts.push(`skipped ${skipped} page(s) [${pages}${skipped > 6 ? ", …" : ""}] via probes`);
@@ -416,8 +422,17 @@ export async function parsePdf(
 		if (switched > 0) {
 			parts.push(`switched ${switched} page(s) via probes`);
 		}
-		new Notice(`LiteParse: ${parts.join("; ")}`, 6000);
-		console.debug("[liteparse-pdf-parser] parse diagnostics", diagnostics);
+		new Notice(`LiteParse: ${parts.join("; ")}`, 8000);
+		console.log("[liteparse-pdf-parser] parse diagnostics", {
+			pdf: pdfVaultPath,
+			templateOverride:
+				templateOverride === undefined
+					? "<undefined — auto>"
+					: templateOverride === null
+						? "<null — forced none>"
+						: { name: templateOverride.name, regions: templateOverride.regions?.length ?? 0, probes: templateOverride.probes?.length ?? 0 },
+			...diagnostics,
+		});
 	}
 	const text: string =
 		typeof r.text === "string"

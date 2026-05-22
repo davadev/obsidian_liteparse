@@ -105,20 +105,38 @@ function parsePageRangeSpec(spec: string | undefined): Set<number> | null {
 	return out.size ? out : null;
 }
 
+/**
+ * Pick a template by path-regex match. Among all templates whose regex
+ * matches the PDF path, prefer the one with the longest pattern source
+ * (= most specific). On ties, the earlier template in the list wins.
+ *
+ * Rationale: users typically add a broad fallback template first (e.g.
+ * `.*\.pdf$`) and then add narrower per-file templates (e.g.
+ * `_resources/1b - AI-1 Organisation\.pdf$`). First-match-wins meant
+ * the broad one always took over. Longest-pattern-wins matches user
+ * intuition: the more specific template wins, regardless of order.
+ */
 export function selectTemplate(
 	templates: ParsingTemplate[],
 	pdfPath: string,
 ): ParsingTemplate | null {
+	let best: ParsingTemplate | null = null;
+	let bestSpecificity = -1;
 	for (const t of templates) {
 		if (!t || !t.match) continue;
 		try {
 			const re = new RegExp(t.match);
-			if (re.test(pdfPath)) return t;
+			if (!re.test(pdfPath)) continue;
 		} catch {
-			// invalid regex — skip
+			continue;
+		}
+		const specificity = t.match.length;
+		if (specificity > bestSpecificity) {
+			best = t;
+			bestSpecificity = specificity;
 		}
 	}
-	return null;
+	return best;
 }
 
 interface PdfRect {

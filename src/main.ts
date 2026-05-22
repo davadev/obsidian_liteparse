@@ -85,6 +85,16 @@ export default class LiteParsePlugin extends Plugin {
 								void this.handleParseFromActiveNote(file);
 							});
 					});
+					if (this.settings.templates.length > 0) {
+						menu.addItem((item) => {
+							item
+								.setTitle("Parse linked PDF with LiteParse (choose template)…")
+								.setIcon("layout-template")
+								.onClick(() => {
+									void this.handleParseFromActiveNoteWithTemplate(file);
+								});
+						});
+					}
 				},
 			),
 		);
@@ -224,6 +234,32 @@ export default class LiteParsePlugin extends Plugin {
 		}).open();
 	}
 
+	private async handleParseFromActiveNoteWithTemplate(note: TFile): Promise<void> {
+		if (note.extension !== "md") return;
+		const content = await this.app.vault.cachedRead(note);
+		const links = findPdfLinks(this.app, content, note.path);
+		if (links.length === 0) {
+			new Notice("LiteParse: no PDF links in this note.");
+			return;
+		}
+		const pick = (match: PdfLinkMatch) => {
+			if (!match.resolvedPath) {
+				new Notice(`LiteParse: could not resolve "${match.rawTarget}".`);
+				return;
+			}
+			const pdf = this.app.vault.getAbstractFileByPath(match.resolvedPath);
+			if (!(pdf instanceof TFile)) {
+				new Notice(`LiteParse: "${match.resolvedPath}" not a vault file.`);
+				return;
+			}
+			this.promptTemplate((override) => {
+				void this.runParseAndInsert(pdf, note, match, override);
+			});
+		};
+		if (links.length === 1) pick(links[0]);
+		else new PdfLinkSuggestModal(this.app, links, pick).open();
+	}
+
 	private async handleParseFromActiveNote(note: TFile): Promise<void> {
 		if (note.extension !== "md") {
 			new Notice("LiteParse: active file is not a Markdown note.");
@@ -348,9 +384,17 @@ export default class LiteParsePlugin extends Plugin {
 			return;
 		}
 		new TemplateChoiceSuggestModal(this.app, this.settings.templates, (c: TemplateChoice) => {
-			if (c.kind === "auto") onPick(undefined);
-			else if (c.kind === "none") onPick(null);
-			else onPick(c.template);
+			if (c.kind === "auto") {
+				new Notice("LiteParse: picked Auto (match by regex).", 3000);
+				onPick(undefined);
+			} else if (c.kind === "none") {
+				new Notice("LiteParse: picked None (no template).", 3000);
+				onPick(null);
+			} else {
+				new Notice(`LiteParse: picked template "${c.template.name}".`, 3000);
+				console.log("[liteparse-pdf-parser] modal picked template", c.template);
+				onPick(c.template);
+			}
 		}).open();
 	}
 

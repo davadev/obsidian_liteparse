@@ -6,6 +6,38 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-05-22
+
+### Fixed
+
+- **Auto-template selection now prefers the most-specific match.**
+  `selectTemplate` previously returned the FIRST regex match in the
+  user's template list. That meant a broad fallback like `.*\.pdf$`
+  at position 1 would always shadow a narrower per-file template at
+  position 2 (e.g. `_resources/1b - AI-1 Organisation\.pdf$`), unless
+  the user manually reordered. Now ties are broken by regex source
+  length — longer source = more specific = higher priority. Users
+  no longer need to reorder templates to get the right one applied.
+
+### Added
+
+- **"Parse linked PDF with LiteParse (choose template)…" editor-menu
+  item.** Right-clicking inside a Markdown note now offers a
+  template-picker variant alongside the auto-match parse, mirroring
+  what's already in the PDF file menu. Picks the same template-choice
+  modal and propagates the override through `runParseAndInsert`.
+- **Notice on template-modal pick.** Immediate confirmation Notice
+  fires when a template is picked from the "(choose template)…" modal:
+  `LiteParse: picked template "X"`. Makes it visually obvious that
+  the pick was registered.
+- **Post-parse Notice now shows template source.** The diagnostic
+  Notice now ends with `(auto)`, `(picked)`, or `(forced none)`, so a
+  user can tell whether an explicit pick actually reached the parser.
+- **Always-on console log of parse diagnostics.** Diagnostics object
+  + the raw `templateOverride` (with name and region/probe counts) is
+  logged via `console.log` on every parse, ungated by the Debug
+  logging toggle.
+
 ## [0.7.4] - 2026-05-21
 
 ### Fixed
