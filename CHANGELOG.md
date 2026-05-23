@@ -6,6 +6,34 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-05-23
+
+### Fixed
+
+- **"My template gets ignored" — the real bug.** Inspected user's
+  `data.json` and traced the flow end-to-end. Their second template
+  was correctly stored, correctly selected, correctly applied. The
+  template's regions DID filter out every text item on every page
+  (it was misconfigured: all three regions had `role: "exclude"`
+  including the body, so survivors=0 on every page). Parser
+  correctly produced an empty markdown.
+
+  Then `output.ts:renderBody()` ran this line:
+  ```ts
+  let md = result.markdown && result.markdown.trim() ? result.markdown : result.text;
+  ```
+  When markdown was empty, it fell back to `result.text` — LiteParse's
+  raw, **unfiltered** page text. The parsed block ended up containing
+  the exact content the template tried to drop. Symptom: looked like
+  the template was ignored, output looked identical to the default
+  parser.
+
+  Fixed: removed the fallback. Empty markdown is now emitted as an
+  inline blockquote explaining the template likely filtered
+  everything — no more silent raw-text leak. Users misconfiguring a
+  template now see a clear "produced no output" message instead of
+  the unfiltered content, which makes the misconfiguration obvious.
+
 ## [0.7.5] - 2026-05-22
 
 ### Fixed

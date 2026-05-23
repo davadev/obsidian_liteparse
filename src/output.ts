@@ -25,9 +25,20 @@ function renderBody(
 	if (format === "text") {
 		return "```\n" + result.text + "\n```";
 	}
-	// markdown (default)
-	let md = result.markdown && result.markdown.trim() ? result.markdown : result.text;
-	md = md.trimEnd();
+	// markdown (default).
+	// NB: do NOT fall back to result.text when markdown is empty. Empty
+	// markdown means the parse produced no content — typically because a
+	// template filtered everything out. Falling back to the raw page text
+	// would silently re-emit content the user's template explicitly tried
+	// to drop, making it look like the template was ignored.
+	let md = (result.markdown ?? "").trimEnd();
+	if (!md.trim()) {
+		md =
+			"> _LiteParse produced no output for this PDF. " +
+			"If you applied a template, its include/exclude regions likely " +
+			"filtered out every text item. Check the template in Settings → " +
+			"Parsing templates._";
+	}
 	if (settings.includeLiteParseJson && result.json) {
 		md += "\n\n<details><summary>LiteParse JSON</summary>\n\n```json\n";
 		md += JSON.stringify(result.json, null, 2);
